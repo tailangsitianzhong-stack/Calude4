@@ -10,6 +10,7 @@ Godot 4.5で作っている、宇宙・惑星開拓ゲームの試作です。�
 - ジャンプ:Space
 - アイテム欄(下中央):1 斧 / 2 ツルハシ(PCでは数字キー)
 - 視点ボタン(右上):一人称と三人称を切り替え(PCではVキー)
+- 持ち物ボタン(右上):持ち物画面を開く。枠をタップ → 移動先の枠をタップで入れ替え(PCではEキー)
 
 斧で木を切ると木材、ツルハシで岩を掘ると石、鉱脈を掘ると鉄鉱石・銅鉱石・結晶が手に入ります。
 
@@ -20,7 +21,8 @@ Godot 4.5で作っている、宇宙・惑星開拓ゲームの試作です。�
 | `scripts/world.gd` | 地形(草原・丘・湖・山脈)、青空、太陽、草花 |
 | `scripts/player.gd` | 一人称/三人称の開拓者、道具を振る動き |
 | `scripts/harvestable.gd` | 木・岩・鉱脈(叩くと体力が減り、資源を落とす) |
-| `scripts/touch_controls.gd` | スマホ用のスティック、ボタン、アイテム欄、照準 |
+| `scripts/inventory.gd` | 持ち物(アイテム欄6枠+かばん18枠、素材は100個で1枠) |
+| `scripts/touch_controls.gd` | スマホ用のスティック、ボタン、アイテム欄、持ち物画面、照準 |
 | `scripts/main.gd` | 資源の配置、持ち物、画面表示などゲーム全体 |
 | `assets/models/` | Blenderで作ったモデル(.glb)。`assets/blender/pioneer.blend` はBlenderで開いて編集できます |
 | `tools/blender/make_assets.py` | モデルを作るBlenderスクリプト |

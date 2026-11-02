@@ -148,6 +148,7 @@ func set_tool(id: String) -> void:
 	# 持ち替えの動き
 	if viewmodel:
 		viewmodel.position = _vm_rest + Vector3(0, -0.3, 0)
+	_apply_body_visibility()
 
 
 func set_first_person(on: bool) -> void:
@@ -155,10 +156,16 @@ func set_first_person(on: bool) -> void:
 	spring.spring_length = 0.0 if on else 3.2
 	spring.position = Vector3.ZERO if on else Vector3(0.45, 0.15, 0)
 	viewmodel.visible = on
-	# 一人称では体は見せず、影だけ落とす
+	_apply_body_visibility()
+
+
+## 一人称では全身モデル(手に持った道具も含む)は見せず、影だけ落とす
+func _apply_body_visibility() -> void:
+	if body_model == null:
+		return
 	for c in body_model.find_children("*", "GeometryInstance3D", true, false):
 		(c as GeometryInstance3D).cast_shadow = (
-			GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if on else GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
+			GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if first_person else GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 
 
 ## いま狙っている物(届く範囲)

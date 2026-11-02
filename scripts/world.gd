@@ -91,16 +91,15 @@ func zone_at(x: float, z: float) -> String:
 
 
 func _color_at(x: float, z: float, h: float, n: Vector3) -> Color:
-	var grass := Color(0.3, 0.52, 0.18).lerp(Color(0.42, 0.58, 0.2), (detail.get_noise_2d(x * 0.6, z * 0.6) + 1.0) * 0.5)
-	var dry := Color(0.55, 0.55, 0.28)
-	var sand := Color(0.82, 0.76, 0.55)
+	var grass := Color(0.26, 0.46, 0.16).lerp(Color(0.34, 0.52, 0.18), (detail.get_noise_2d(x * 0.6, z * 0.6) + 1.0) * 0.5)
+	var dry := Color(0.42, 0.47, 0.2)
+	var mud := Color(0.24, 0.27, 0.16)
 	var rock := Color(0.42, 0.4, 0.38)
 	var snow := Color(0.95, 0.96, 0.98)
-	var c := grass.lerp(dry, clampf((noise.get_noise_2d(x * 2.0, z * 2.0) - 0.2) * 2.0, 0.0, 0.6))
-	if h < WATER_LEVEL + 0.5:
-		c = sand
-	elif h < WATER_LEVEL + 1.0:
-		c = sand.lerp(c, (h - WATER_LEVEL - 0.5) / 0.5)
+	var c := grass.lerp(dry, clampf((noise.get_noise_2d(x * 2.0, z * 2.0) - 0.2) * 2.0, 0.0, 0.5))
+	# 水の中だけ泥っぽく(岸までは草)
+	if h < WATER_LEVEL:
+		c = c.lerp(mud, clampf((WATER_LEVEL - h) / 0.6, 0.0, 1.0))
 	var slope := 1.0 - n.y
 	c = c.lerp(rock, clampf((slope - 0.18) * 5.0, 0.0, 1.0))
 	c = c.lerp(rock, clampf((h - 9.0) / 4.0, 0.0, 1.0))

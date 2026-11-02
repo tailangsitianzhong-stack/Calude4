@@ -1,9 +1,6 @@
 extends Node3D
 ## ゲーム全体のまとめ役。最初の惑星(地表)を作り、資源・アイテム欄・画面表示を動かす。
 
-const ITEM_NAMES := {"wood": "木材", "stone": "石", "iron": "鉄鉱石", "copper": "銅鉱石", "crystal": "結晶"}
-const ITEM_ORDER := ["wood", "stone", "iron", "copper", "crystal"]
-
 ## 叩いて取れる物の種類
 const KINDS := {
 	"oak": {"name": "広葉樹", "tool": "axe", "hp": 4, "drop": {"wood": 3}, "tree": true, "scene": "tree_oak", "count": 70},
@@ -27,24 +24,20 @@ var rng := RandomNumberGenerator.new()
 var world: World
 var player: Player
 var controls: TouchControls
-var inv_label: Label
 var msg_label: Label
 var _msg_time := 0.0
 var _scenes := {}
 var _respawn_queue: Array[Dictionary] = []   # {kind, time}
 var _particles: CPUParticles3D
 
-var inventory := {}
-var hotbar := [
-	{"id": "axe", "label": "斧"},
-	{"id": "pickaxe", "label": "ツルハシ"},
-]
+var inventory := Inventory.new()
 
 
 func _ready() -> void:
 	rng.seed = 20261102
-	for k in ITEM_ORDER:
-		inventory[k] = 0
+	# 最初の持ち物は斧とツルハシ
+	inventory.add("axe", 1)
+	inventory.add("pickaxe", 1)
 
 	world = World.new()
 	add_child(world)
@@ -153,20 +146,13 @@ func _make_hud() -> void:
 
 	controls = TouchControls.new()
 	controls.player = player
-	controls.slots = hotbar
+	controls.inventory = inventory
 	controls.slot_selected.connect(_select_slot)
 	controls.view_toggled.connect(func() -> void:
 		player.set_first_person(not player.first_person)
 		show_message("一人称視点" if player.first_person else "三人称視点", 1.2)
 	)
 	layer.add_child(controls)
-
-	inv_label = Label.new()
-	inv_label.position = Vector2(18, 12)
-	inv_label.add_theme_font_size_override("font_size", 20)
-	inv_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.75))
-	inv_label.add_theme_constant_override("outline_size", 6)
-	layer.add_child(inv_label)
 
 	msg_label = Label.new()
 	msg_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
@@ -181,8 +167,11 @@ func _make_hud() -> void:
 
 func _select_slot(i: int) -> void:
 	controls.selected_slot = i
-	var id: String = hotbar[i]["id"] if i < hotbar.size() else ""
-	player.set_tool(id)
+	var id := inventory.id_at(i)
+	# 道具なら手に持つ。素材や空の枠なら素手
+	var tool_id := id if Inventory.is_tool_item(id) else ""
+	if tool_id != player.current_tool:
+		player.set_tool(tool_id)
 
 
 func show_message(text: String, seconds := 2.0) -> void:
@@ -207,8 +196,10 @@ func _on_swung(target: Object, point: Vector3) -> void:
 	if res["done"]:
 		var got := []
 		for item in h.drops:
-			inventory[item] += h.drops[item]
-			got.append("%s +%d" % [ITEM_NAMES[item], h.drops[item]])
+			var left := inventory.add(item, h.drops[item])
+			got.append("%s +%d" % [Inventory.item_name(item), h.drops[item] - left])
+			if left > 0:
+				got.append("(持ち物がいっぱい)")
 		show_message("  ".join(got), 1.6)
 
 
@@ -225,12 +216,6 @@ func _process(delta: float) -> void:
 	for r in _respawn_queue.filter(func(x: Dictionary) -> bool: return x["time"] <= 0.0):
 		_spawn(r["kind"])
 		_respawn_queue.erase(r)
-
-	var parts := []
-	for k in ITEM_ORDER:
-		if inventory[k] > 0 or k in ["wood", "stone"]:
-			parts.append("%s %d" % [ITEM_NAMES[k], inventory[k]])
-	inv_label.text = "  ".join(parts)
 
 	var t := player.get_target()
 	if t:

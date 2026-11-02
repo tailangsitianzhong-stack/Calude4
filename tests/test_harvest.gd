@@ -45,8 +45,8 @@ func _process(_delta: float) -> bool:
 				stage = 1
 				frames = 0
 		1:
-			if main.inventory["wood"] > 0:
-				print("PASS: 木を切って木材 %d" % main.inventory["wood"])
+			if main.inventory.total("wood") > 0:
+				print("PASS: 木を切って木材 %d" % main.inventory.total("wood"))
 				main.controls._key_attack = false
 				target = _face(false)
 				stage = 2
@@ -60,10 +60,10 @@ func _process(_delta: float) -> bool:
 				main._select_slot(0)  # 斧のまま岩を叩く
 				main.controls._key_attack = true
 			if frames == 120:
-				print(("PASS" if main.inventory["stone"] == 0 else "FAIL") + ": 斧では岩が掘れない (石 %d)" % main.inventory["stone"])
+				print(("PASS" if main.inventory.total("stone") == 0 else "FAIL") + ": 斧では岩が掘れない (石 %d)" % main.inventory.total("stone"))
 				main._select_slot(1)  # ツルハシ
-			if main.inventory["stone"] > 0:
-				print("PASS: ツルハシで岩を掘って石 %d" % main.inventory["stone"])
+			if main.inventory.total("stone") > 0:
+				print("PASS: ツルハシで岩を掘って石 %d" % main.inventory.total("stone"))
 				return true
 			if frames > 800:
 				print("FAIL: ツルハシで石が増えない")
