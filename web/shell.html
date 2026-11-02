@@ -71,12 +71,12 @@ h1 { margin: 0; font: 700 clamp(2rem, 8vw, 3rem)/1.05 var(--display); letter-spa
 
 <div id="boot">
   <div class="card">
-    <div class="eyebrow">Surface Expedition · R = 40 m</div>
+    <div class="eyebrow">Landing Site · Grassland</div>
     <h1>Planet Pioneer</h1>
-    <p class="lede">惑星の地表を歩いて鉱石と結晶を集め、採掘機と居住ドームを建てて入植者20人の基地を作ろう。</p>
+    <p class="lede">青空の惑星の草原に降り立った開拓者。斧で木を切り、ツルハシで岩や鉱石を掘って資源を集めよう。</p>
     <div class="bar" aria-hidden="true"><i id="bar"></i></div>
     <div class="status" id="status" role="status">エンジンを読み込み中…</div>
-    <p class="keys">左側をなぞって移動 / 右側をドラッグで視点 / 右下のボタンで操作<br>PC: WASD・マウス・Space・E・1・2</p>
+    <p class="keys">左側をなぞって移動 / 右側をドラッグで視点 / 攻撃ボタン長押しで掘る<br>PC: WASD・マウス・F 攻撃・Space・1〜6・V 視点</p>
   </div>
 </div>
 <div id="rotate">横向きにすると遊びやすくなります</div>
@@ -126,7 +126,7 @@ h1 { margin: 0; font: 700 clamp(2rem, 8vw, 3rem)/1.05 var(--display); letter-spa
       if (current > 0 && total > 0) {
         const pct = Math.min(100, Math.round(current / total * 100));
         bar.style.width = pct + '%';
-        status.textContent = '読み込み中 ' + pct + '%(約9MB)';
+        status.textContent = '読み込み中 ' + pct + '%(約10MB)';
       }
     },
   }).then(() => { boot.hidden = true; }, fail);
