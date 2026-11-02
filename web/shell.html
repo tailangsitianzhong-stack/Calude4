@@ -1,0 +1,134 @@
+<title>Planet Pioneer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 一画面のゲーム。宇宙の夜空を背景に、中央に読み込み表示だけを置く */
+:root {
+  --space: #070a17;
+  --panel: #10162e;
+  --ink: #e9eefc;
+  --muted: #8f9bc4;
+  --rust: #d2693e;
+  --ice: #6fd3ff;
+  --display: "Chakra Petch", "Noto Sans JP", system-ui, sans-serif;
+  --body: "Noto Sans JP", system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  background: var(--space);
+  color: var(--ink);
+  font-family: var(--body);
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#canvas {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+  outline: none;
+}
+#boot {
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px;
+  background:
+    radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--rust) 45%, transparent) 0 34%, transparent 35%),
+    radial-gradient(1px 1px at 20% 30%, var(--ink) 50%, transparent 51%),
+    radial-gradient(1px 1px at 70% 18%, var(--ink) 50%, transparent 51%),
+    radial-gradient(1px 1px at 84% 52%, var(--muted) 50%, transparent 51%),
+    radial-gradient(1px 1px at 38% 62%, var(--muted) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 58% 40%, var(--ice) 50%, transparent 51%),
+    var(--space);
+  z-index: 5;
+}
+.card { width: min(420px, 100%); display: grid; gap: 14px; text-align: center; }
+.eyebrow { font: 600 0.75rem/1 var(--display); letter-spacing: 0.24em; text-transform: uppercase; color: var(--ice); }
+h1 { margin: 0; font: 700 clamp(2rem, 8vw, 3rem)/1.05 var(--display); letter-spacing: 0.02em; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.6; }
+.bar { height: 6px; border-radius: 3px; background: var(--panel); overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--rust), var(--ice)); transition: width .2s; }
+.status { font: 500 0.8rem/1.4 var(--display); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+.status.error { color: var(--rust); white-space: pre-line; }
+.keys { margin: 0; font-size: 0.78rem; color: var(--muted); line-height: 1.7; }
+#rotate {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  padding: 8px 14px; border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  color: var(--ink); font-size: 0.8rem; z-index: 6; pointer-events: none;
+}
+@media (orientation: landscape) { #rotate { display: none; } }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Noto+Sans+JP:wght@400;500&display=swap">
+
+<canvas id="canvas" tabindex="0">このブラウザはHTML5 canvasに対応していません</canvas>
+
+<div id="boot">
+  <div class="card">
+    <div class="eyebrow">Surface Expedition · R = 40 m</div>
+    <h1>Planet Pioneer</h1>
+    <p class="lede">惑星の地表を歩いて鉱石と結晶を集め、採掘機と居住ドームを建てて入植者20人の基地を作ろう。</p>
+    <div class="bar" aria-hidden="true"><i id="bar"></i></div>
+    <div class="status" id="status" role="status">エンジンを読み込み中…</div>
+    <p class="keys">左側をなぞって移動 / 右側をドラッグで視点 / 右下のボタンで操作<br>PC: WASD・マウス・Space・E・1・2</p>
+  </div>
+</div>
+<div id="rotate">横向きにすると遊びやすくなります</div>
+
+<script>
+(function () {
+  // 配信できるファイル形式の都合で、データは .wasm の名前で置いている。
+  // 本体(index.wasm)はgzip圧縮版を取得してブラウザ側で展開し、index.pck は名前を付け替えて取得する。
+  const realFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : input.url;
+    if (/index\.wasm(\?|$)/.test(url)) {
+      return realFetch(url.replace(/index\.wasm/, 'index.wasm-gz.wasm'), init).then((res) => {
+        if (!res.ok) return res;
+        const body = res.body.pipeThrough(new DecompressionStream('gzip'));
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'application/wasm' } });
+      });
+    }
+    if (/index\.pck(\?|$)/.test(url)) {
+      return realFetch(url.replace(/index\.pck/, 'index.pck.wasm'), init);
+    }
+    return realFetch(input, init);
+  };
+})();
+</script>
+<script src="index.js"></script>
+<script>
+/*__GODOT_CONFIG__*/
+(function () {
+  const boot = document.getElementById('boot');
+  const bar = document.getElementById('bar');
+  const status = document.getElementById('status');
+  function fail(err) {
+    console.error(err);
+    status.classList.add('error');
+    status.textContent = '起動できませんでした。\n' + (err && err.message ? err.message : String(err));
+  }
+  if (!('DecompressionStream' in window)) {
+    fail(new Error('ブラウザが古いため読み込めません。ブラウザを最新版に更新してください。'));
+    return;
+  }
+  const missing = Engine.getMissingFeatures({ threads: false });
+  if (missing.length) { fail(new Error('必要な機能がありません: ' + missing.join(', '))); return; }
+  const engine = new Engine(GODOT_CONFIG);
+  engine.startGame({
+    onProgress: function (current, total) {
+      if (current > 0 && total > 0) {
+        const pct = Math.min(100, Math.round(current / total * 100));
+        bar.style.width = pct + '%';
+        status.textContent = '読み込み中 ' + pct + '%(約9MB)';
+      }
+    },
+  }).then(() => { boot.hidden = true; }, fail);
+})();
+</script>
