@@ -13,6 +13,7 @@ var move_input := Vector2.ZERO
 var look_delta := Vector2.ZERO
 var jump_requested := false
 var attack_held := false
+var can_swing := true       ## 設置できる物を持っているときは振らない
 
 var walk_speed := 5.0
 var jump_speed := 5.2
@@ -168,6 +169,14 @@ func _apply_body_visibility() -> void:
 			GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY if first_person else GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 
 
+## 視線の先で地面(や設置物)に当たる場所。届かなければ空の辞書
+func get_aim_hit(max_dist: float) -> Dictionary:
+	var from := camera.global_position
+	var to := from - camera.global_transform.basis.z * max_dist
+	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 4, [get_rid()])
+	return get_world_3d().direct_space_state.intersect_ray(q)
+
+
 ## いま狙っている物(届く範囲)
 func get_target() -> Object:
 	if ray.is_colliding():
@@ -222,7 +231,7 @@ func _update_attack(delta: float) -> void:
 			_hit_pending = false
 			var target := get_target()
 			swung.emit(target, ray.get_collision_point() if ray.is_colliding() else Vector3.ZERO)
-	elif attack_held:
+	elif attack_held and can_swing:
 		_swing_timer = SWING_TIME
 		_hit_pending = true
 		if anim and anim.has_animation("Swing"):

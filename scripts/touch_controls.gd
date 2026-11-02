@@ -7,11 +7,15 @@ extends Control
 
 signal slot_selected(index: int)
 signal view_toggled
+signal craft_requested(index: int)
 
 const JOY_RADIUS := 90.0
 const LOOK_SENSITIVITY := 0.005
 const SLOT_SIZE := 72.0
 const SLOT_GAP := 8.0
+const CRAFT_W := 450.0
+const PANEL_GAP := 20.0
+const CRAFT_ROW_H := 96.0
 
 var player: Player
 var inventory: Inventory
@@ -19,6 +23,7 @@ var selected_slot := 0
 var target_name := ""
 var target_ratio := -1.0       ## 狙っている物の残り体力(0〜1)、なければ -1
 var bag_open := false
+var attack_label := "攻撃"   ## 設置できる物を持っているときは「設置」
 
 var _joy_index := -1
 var _joy_origin := Vector2.ZERO
@@ -41,7 +46,7 @@ func _ready() -> void:
 func _buttons() -> Array:
 	var s := size
 	return [
-		{"id": "attack", "label": "攻撃", "pos": Vector2(s.x - 150, s.y - 175), "r": 100.0},
+		{"id": "attack", "label": attack_label, "pos": Vector2(s.x - 150, s.y - 175), "r": 100.0},
 		{"id": "jump", "label": "ジャンプ", "pos": Vector2(s.x - 345, s.y - 100), "r": 72.0},
 		{"id": "view", "label": "視点", "pos": Vector2(s.x - 62, 62), "r": 42.0},
 		{"id": "bag", "label": "持ち物", "pos": Vector2(s.x - 170, 62), "r": 42.0},
@@ -54,10 +59,27 @@ func _hotbar_rect(i: int) -> Rect2:
 	return Rect2(Vector2(x0 + i * (SLOT_SIZE + SLOT_GAP), size.y - SLOT_SIZE - 14.0), Vector2(SLOT_SIZE, SLOT_SIZE))
 
 
+## 持ち物画面(右側)。左にクラフト画面が並ぶので、2つ合わせて中央に置く
 func _panel_rect() -> Rect2:
 	var w := 6 * SLOT_SIZE + 5 * SLOT_GAP + 48.0
 	var h := 4 * SLOT_SIZE + 3 * SLOT_GAP + 140.0
-	return Rect2((size - Vector2(w, h)) / 2.0 + Vector2(0, -20), Vector2(w, h))
+	var x0 := (size.x - (CRAFT_W + PANEL_GAP + w)) / 2.0
+	return Rect2(Vector2(x0 + CRAFT_W + PANEL_GAP, (size.y - h) / 2.0 - 20.0), Vector2(w, h))
+
+
+func _craft_rect() -> Rect2:
+	var p := _panel_rect()
+	return Rect2(Vector2(p.position.x - PANEL_GAP - CRAFT_W, p.position.y), Vector2(CRAFT_W, p.size.y))
+
+
+func _craft_row_rect(i: int) -> Rect2:
+	var c := _craft_rect()
+	return Rect2(c.position + Vector2(16, 56 + i * (CRAFT_ROW_H + 8)), Vector2(CRAFT_W - 32, CRAFT_ROW_H))
+
+
+func _craft_button_rect(i: int) -> Rect2:
+	var r := _craft_row_rect(i)
+	return Rect2(Vector2(r.end.x - 92, r.position.y + (r.size.y - 48) / 2.0), Vector2(80, 48))
 
 
 ## 持ち物画面の枠。かばん(3段)が上、アイテム欄(1段)が下
@@ -87,7 +109,10 @@ func _hit_test(p: Vector2) -> String:
 		for i in Inventory.SIZE:
 			if _bag_rect(i).has_point(p):
 				return "bag%d" % i
-		if _panel_rect().has_point(p):
+		for i in Inventory.RECIPES.size():
+			if _craft_button_rect(i).grow(6).has_point(p):
+				return "craft%d" % i
+		if _panel_rect().has_point(p) or _craft_rect().has_point(p):
 			return "panel"
 		return "close"
 	for b in _buttons():
@@ -127,6 +152,8 @@ func _press(id: String, index: int) -> void:
 		_:
 			if id.begins_with("slot"):
 				slot_selected.emit(int(id.substr(4)))
+			elif id.begins_with("craft"):
+				craft_requested.emit(int(id.substr(5)))
 			elif id.begins_with("bag"):
 				_tap_bag_slot(int(id.substr(3)))
 
@@ -279,6 +306,7 @@ func _draw() -> void:
 
 func _draw_bag(font: Font) -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.45))
+	_draw_craft(font)
 	var p := _panel_rect()
 	draw_rect(p, Color(0.11, 0.13, 0.16, 0.96))
 	draw_rect(p, Color(1, 1, 1, 0.35), false, 2.0)
@@ -339,6 +367,42 @@ func _draw_item_icon(rect: Rect2, id: String) -> void:
 				var spot := Color(0.85, 0.5, 0.28) if id == "iron" else Color(0.3, 0.78, 0.62)
 				for q in [Vector2(-6, -4), Vector2(6, 4), Vector2(5, -8), Vector2(-8, 7)]:
 					draw_circle(c + q, 3.5, spot)
+		"workbench":
+			draw_rect(Rect2(c + Vector2(-22, -10), Vector2(44, 8)), Color(0.72, 0.52, 0.3))
+			draw_rect(Rect2(c + Vector2(-19, -2), Vector2(6, 20)), Color(0.5, 0.33, 0.18))
+			draw_rect(Rect2(c + Vector2(13, -2), Vector2(6, 20)), Color(0.5, 0.33, 0.18))
+			draw_rect(Rect2(c + Vector2(-15, 8), Vector2(30, 4)), Color(0.6, 0.42, 0.24))
+			draw_rect(Rect2(c + Vector2(-10, -16), Vector2(12, 6)), Color(0.55, 0.56, 0.6))
 		"crystal":
 			draw_colored_polygon(PackedVector2Array([c + Vector2(0, -20), c + Vector2(11, -4), c + Vector2(0, 18), c + Vector2(-11, -4)]), Color(0.7, 0.55, 1.0))
 			draw_colored_polygon(PackedVector2Array([c + Vector2(0, -20), c + Vector2(11, -4), c + Vector2(0, -4)]), Color(0.88, 0.8, 1.0))
+
+
+func _draw_craft(font: Font) -> void:
+	var c := _craft_rect()
+	draw_rect(c, Color(0.11, 0.13, 0.16, 0.96))
+	draw_rect(c, Color(1, 1, 1, 0.35), false, 2.0)
+	draw_string(font, c.position + Vector2(20, 38), "クラフト", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color.WHITE)
+	for i in Inventory.RECIPES.size():
+		var rec: Dictionary = Inventory.RECIPES[i]
+		var row := _craft_row_rect(i)
+		var ok := inventory.can_afford(rec["cost"])
+		draw_rect(row, Color(1, 1, 1, 0.06))
+		var icon := Rect2(row.position + Vector2(8, (row.size.y - SLOT_SIZE) / 2.0), Vector2(SLOT_SIZE, SLOT_SIZE))
+		draw_rect(icon, Color(0.08, 0.1, 0.12, 0.8))
+		_draw_item_icon(icon, rec["id"])
+		var tx := icon.end.x + 12
+		draw_string(font, Vector2(tx, row.position.y + 34), Inventory.item_name(rec["id"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
+		# 必要な素材(持っている数 / 必要な数)。足りない物は赤
+		var x := tx
+		for k in rec["cost"]:
+			var have := inventory.total(k)
+			var need: int = rec["cost"][k]
+			var txt := "%s %d/%d" % [Inventory.item_name(k), mini(have, 999), need]
+			var col := Color(0.75, 0.95, 0.7) if have >= need else Color(1.0, 0.55, 0.5)
+			draw_string(font, Vector2(x, row.position.y + 66), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col)
+			x += font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 12
+		var b := _craft_button_rect(i)
+		var pressed := _pressed.values().has("craft%d" % i)
+		draw_rect(b, Color(0.3, 0.7, 0.4, 0.95 if pressed else 0.8) if ok else Color(0.35, 0.35, 0.38, 0.6))
+		draw_string(font, Vector2(b.position.x, b.position.y + 31), "作る", HORIZONTAL_ALIGNMENT_CENTER, b.size.x, 20, Color.WHITE if ok else Color(1, 1, 1, 0.45))

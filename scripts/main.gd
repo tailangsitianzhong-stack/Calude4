@@ -32,6 +32,16 @@ var _particles: CPUParticles3D
 
 var inventory := Inventory.new()
 
+# 設置
+const PLACE_REACH := 5.0
+var _workbench_scene: PackedScene
+var _preview: Node3D
+var _preview_ok_mat: StandardMaterial3D
+var _preview_ng_mat: StandardMaterial3D
+var _preview_valid := false
+var _placed: Array[Node3D] = []
+var _was_attack := false
+
 
 func _ready() -> void:
 	rng.seed = 20261102
@@ -51,6 +61,7 @@ func _ready() -> void:
 			_spawn(kind)
 	_spawn_bushes(45)
 	_make_particles()
+	_make_preview()
 
 	player = Player.new()
 	add_child(player)
@@ -152,6 +163,8 @@ func _make_hud() -> void:
 		player.set_first_person(not player.first_person)
 		show_message("一人称視点" if player.first_person else "三人称視点", 1.2)
 	)
+	controls.craft_requested.connect(_on_craft)
+	inventory.changed.connect(func() -> void: _select_slot(controls.selected_slot))
 	layer.add_child(controls)
 
 	msg_label = Label.new()
@@ -170,6 +183,10 @@ func _select_slot(i: int) -> void:
 	var id := inventory.id_at(i)
 	# 道具なら手に持つ。素材や空の枠なら素手
 	var tool_id := id if Inventory.is_tool_item(id) else ""
+	# 設置できる物を持っているときは、攻撃ボタンが「設置」になる
+	var placing := Inventory.is_placeable(id)
+	player.can_swing = not placing
+	controls.attack_label = "設置" if placing else "攻撃"
 	if tool_id != player.current_tool:
 		player.set_tool(tool_id)
 
@@ -211,6 +228,7 @@ func _on_destroyed(h: Harvestable) -> void:
 # ---------------------------------------------------------------- 毎フレーム
 
 func _process(delta: float) -> void:
+	_update_placement()
 	for r in _respawn_queue:
 		r["time"] -= delta
 	for r in _respawn_queue.filter(func(x: Dictionary) -> bool: return x["time"] <= 0.0):
@@ -229,3 +247,105 @@ func _process(delta: float) -> void:
 		_msg_time -= delta
 		if _msg_time < 0.5:
 			msg_label.modulate.a = maxf(_msg_time / 0.5, 0.0)
+
+
+# ---------------------------------------------------------------- クラフトと設置
+
+func _on_craft(i: int) -> void:
+	var rec: Dictionary = Inventory.RECIPES[i]
+	var err := inventory.craft(rec)
+	if err == "":
+		show_message("%s を作った" % Inventory.item_name(rec["id"]), 1.6)
+	else:
+		show_message(err, 2.2)
+
+
+func _make_preview() -> void:
+	_workbench_scene = load("res://assets/models/workbench.glb")
+	_preview = _workbench_scene.instantiate()
+	_preview.visible = false
+	add_child(_preview)
+	_preview_ok_mat = _ghost_material(Color(0.4, 1.0, 0.5, 0.45))
+	_preview_ng_mat = _ghost_material(Color(1.0, 0.35, 0.3, 0.45))
+	for m in _preview.find_children("*", "GeometryInstance3D", true, false):
+		(m as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+func _ghost_material(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = c
+	return m
+
+
+## 設置できる物を持っているとき、視線の先に半透明の見本を出す。攻撃(設置)ボタンを押した瞬間に置く
+func _update_placement() -> void:
+	var held := inventory.id_at(controls.selected_slot)
+	var pressed_now := player.attack_held and not _was_attack
+	_was_attack = player.attack_held
+	if not Inventory.is_placeable(held) or controls.bag_open:
+		_preview.visible = false
+		return
+
+	var reach := PLACE_REACH + (0.0 if player.first_person else player.spring.spring_length)
+	var hit := player.get_aim_hit(reach)
+	if hit.is_empty():
+		_preview.visible = false
+		if pressed_now:
+			show_message("地面を狙って設置しよう")
+		return
+
+	var pos: Vector3 = hit["position"]
+	var normal: Vector3 = hit["normal"]
+	var reason := ""
+	if hit["collider"] is Harvestable or (hit["collider"] as Node).is_in_group("placed"):
+		reason = "ほかの物の上には置けない"
+	elif normal.y < 0.8:
+		reason = "坂が急すぎて置けない"
+	elif pos.y < World.WATER_LEVEL and Vector2(pos.x, pos.z).distance_to(World.LAKE_CENTER) < World.LAKE_RADIUS * 1.3:
+		reason = "水の中には置けない"
+	elif Vector2(pos.x - player.global_position.x, pos.z - player.global_position.z).length() < 1.0:
+		reason = "自分の足元には置けない"
+	else:
+		for n in get_children():
+			if (n is Harvestable or n.is_in_group("placed")) and Vector2(n.global_position.x - pos.x, n.global_position.z - pos.z).length() < 1.4:
+				reason = "近くの物とぶつかる"
+				break
+	_preview_valid = reason == ""
+
+	# 作業する側(正面)をプレイヤーに向ける
+	var to_player := player.global_position - pos
+	_preview.global_position = pos
+	_preview.rotation = Vector3(0, atan2(-to_player.x, -to_player.z), 0)
+	_preview.visible = true
+	for m in _preview.find_children("*", "GeometryInstance3D", true, false):
+		(m as GeometryInstance3D).material_override = _preview_ok_mat if _preview_valid else _preview_ng_mat
+
+	if pressed_now:
+		if _preview_valid:
+			_place(held, _preview.global_transform)
+		else:
+			show_message(reason)
+
+
+func _place(id: String, xform: Transform3D) -> void:
+	var body := StaticBody3D.new()
+	body.collision_layer = 1
+	body.collision_mask = 0
+	body.add_to_group("placed")
+	body.set_meta("item", id)
+	var model: Node3D = _workbench_scene.instantiate()
+	body.add_child(model)
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(1.32, 0.92, 0.6)
+	col.shape = box
+	col.position.y = 0.46
+	body.add_child(col)
+	add_child(body)
+	body.global_transform = xform
+	_placed.append(body)
+	inventory.remove(id, 1)
+	_burst(xform.origin + Vector3(0, 0.3, 0), Color(0.6, 0.45, 0.28))
+	show_message("%s を設置した" % Inventory.item_name(id), 1.6)

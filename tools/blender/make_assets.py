@@ -609,9 +609,49 @@ def make_nature():
     export(os.path.join(OUT, "crystal.glb"), [join(parts, "Crystal")])
 
 
+# ------------------------------------------------------------------ 設置物
+
+def make_workbench():
+    """作業台。原点は床の中心、正面(作業する側)は +Y"""
+    reset()
+    plank = mat("Plank", (0.66, 0.46, 0.27), rough=0.8)
+    dark = mat("PlankDark", (0.45, 0.3, 0.17), rough=0.85)
+    iron = mat("Iron", (0.45, 0.46, 0.5), rough=0.4, metal=0.9)
+    stone = mat("Stone", (0.55, 0.55, 0.53), rough=0.9)
+    handle = mat("Handle", (0.55, 0.36, 0.2), rough=0.7)
+    parts = []
+    # 天板(板を3枚並べる)
+    for i, y in enumerate((-0.22, 0.0, 0.22)):
+        parts.append(prim("cube", (0, y, 0.86), (1.3, 0.21, 0.07), m=plank if i != 1 else dark, bevel=0.01, angle=0.6))
+    # 脚と横木
+    for x in (-0.56, 0.56):
+        for y in (-0.24, 0.24):
+            parts.append(prim("cube", (x, y, 0.41), (0.09, 0.09, 0.82), m=dark, bevel=0.008, angle=0.6))
+        parts.append(prim("cube", (x, 0, 0.2), (0.07, 0.5, 0.06), m=dark, bevel=0.006, angle=0.6))
+    # 下の棚と、その上の石
+    parts.append(prim("cube", (0, 0, 0.2), (1.12, 0.5, 0.04), m=plank, bevel=0.006, angle=0.6))
+    parts.append(jitter(prim("ico", (-0.3, 0.05, 0.3), (0.26, 0.22, 0.18), m=stone, smooth=False, sub=1), 0.02, seed=7))
+    parts.append(jitter(prim("ico", (-0.05, -0.08, 0.28), (0.2, 0.18, 0.14), m=stone, smooth=False, sub=1), 0.02, seed=8))
+    # 天板の角の金具
+    for x in (-0.64, 0.64):
+        for y in (-0.31, 0.31):
+            parts.append(prim("cube", (x, y, 0.86), (0.05, 0.05, 0.09), m=iron))
+    # 万力
+    parts.append(prim("cube", (0.5, 0.33, 0.83), (0.18, 0.08, 0.12), m=iron, bevel=0.01, angle=0.6))
+    parts.append(limb((0.5, 0.37, 0.83), (0.5, 0.52, 0.83), 0.015, iron, seg=8))
+    parts.append(limb((0.42, 0.52, 0.83), (0.58, 0.52, 0.83), 0.012, iron, seg=8))
+    # 天板の上の金づちとのこぎり
+    parts.append(limb((-0.35, 0.05, 0.915), (-0.05, 0.12, 0.915), 0.018, handle, seg=8))
+    parts.append(prim("cube", (-0.04, 0.12, 0.925), (0.05, 0.13, 0.05), (0, 0, 0.23), m=iron, bevel=0.006, angle=0.6))
+    parts.append(prim("cube", (0.15, -0.16, 0.9), (0.42, 0.11, 0.006), (0, 0, -0.1), m=iron))
+    parts.append(prim("cube", (-0.1, -0.13, 0.91), (0.12, 0.06, 0.03), (0, 0, -0.1), m=handle, bevel=0.008, angle=0.6))
+    export(os.path.join(OUT, "workbench.glb"), [join(parts, "Workbench")])
+
+
 if __name__ == "__main__":
     make_pioneer()
     make_fp_arm()
     make_tools()
     make_nature()
+    make_workbench()
     print("done")
