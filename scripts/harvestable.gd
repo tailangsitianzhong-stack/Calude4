@@ -7,6 +7,7 @@ signal destroyed(node: Harvestable)
 var kind := ""
 var display_name := ""
 var tool := ""            ## 必要な道具 "axe" / "pickaxe"
+var tier := 1             ## 必要な道具の段階(2 = 鉄の道具)
 var max_hp := 1
 var hp := 1
 var drops := {}
@@ -20,6 +21,8 @@ func setup(kind_id: String, def: Dictionary, scene: PackedScene, rng: RandomNumb
 	kind = kind_id
 	display_name = def["name"]
 	tool = def["tool"]
+	tier = def.get("tier", 1)
+	add_to_group("harvestable")
 	max_hp = def["hp"]
 	hp = max_hp
 	drops = def["drop"]
@@ -49,13 +52,15 @@ func setup(kind_id: String, def: Dictionary, scene: PackedScene, rng: RandomNumb
 
 
 ## 叩かれたとき。結果を辞書で返す {ok, message, done}
-func hit(tool_id: String, from: Vector3) -> Dictionary:
+func hit(tool_kind: String, power: int, tool_tier: int, from: Vector3) -> Dictionary:
 	if _dying:
 		return {"ok": false, "message": ""}
-	if tool_id != tool:
+	if tool_kind != tool:
 		var need := "斧" if tool == "axe" else "ツルハシ"
 		return {"ok": false, "message": "%sが必要(%sを選んでね)" % [need, need]}
-	hp -= 1
+	if tool_tier < tier:
+		return {"ok": false, "message": "鉄の%sでないと掘れない" % ("斧" if tool == "axe" else "ツルハシ")}
+	hp -= power
 	_shake = 0.25
 	if hp <= 0:
 		_die(from)

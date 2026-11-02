@@ -14,6 +14,7 @@ var look_delta := Vector2.ZERO
 var jump_requested := false
 var attack_held := false
 var can_swing := true       ## 設置できる物を持っているときは振らない
+var in_water: Callable      ## (位置) -> 水の中か
 
 var walk_speed := 5.0
 var jump_speed := 5.2
@@ -141,8 +142,11 @@ func set_tool(id: String) -> void:
 			continue
 		for c in holder.get_children():
 			c.queue_free()
-		if _tools.has(id):
-			var t: Node3D = _tools[id].instantiate()
+		var kind := ItemDB.tool_kind(id)
+		if _tools.has(kind):
+			var t: Node3D = _tools[kind].instantiate()
+			if ItemDB.tool_tier(id) >= 2:
+				t.scale = Vector3.ONE * 1.08  # 鉄の道具は少し大きい
 			holder.add_child(t)
 			if holder == vm_tool_holder:
 				_set_no_shadow(t)
@@ -199,10 +203,17 @@ func _physics_process(delta: float) -> void:
 	if wish.length() > 1.0:
 		wish = wish.normalized()
 	var accel := 12.0 if is_on_floor() else 3.0
-	var horiz := Vector3(velocity.x, 0, velocity.z).lerp(wish * walk_speed, clampf(accel * delta, 0.0, 1.0))
+	# 湖の中では泳ぐ(ゆっくり沈み、ジャンプで浮き上がる)
+	var swimming: bool = in_water.is_valid() and in_water.call(global_position + Vector3(0, 1.1, 0))
+	var speed := walk_speed * (0.55 if swimming else 1.0)
+	var horiz := Vector3(velocity.x, 0, velocity.z).lerp(wish * speed, clampf(accel * delta, 0.0, 1.0))
 	velocity.x = horiz.x
 	velocity.z = horiz.z
-	if is_on_floor():
+	if swimming:
+		velocity.y = maxf(velocity.y - gravity * 0.15 * delta, -1.2)
+		if jump_requested:
+			velocity.y = 3.2
+	elif is_on_floor():
 		if jump_requested:
 			velocity.y = jump_speed
 	else:

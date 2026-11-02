@@ -648,10 +648,188 @@ def make_workbench():
     export(os.path.join(OUT, "workbench.glb"), [join(parts, "Workbench")])
 
 
+def make_stations():
+    """製炉・工業用製炉・旋盤・発射台・ロケット。原点は床の中心、正面は +Y"""
+    R = math.radians
+
+    # 製炉(石を積んだかまど)
+    reset()
+    stone = mat("Stone", (0.58, 0.57, 0.54), rough=0.95)
+    dark = mat("StoneDark", (0.36, 0.35, 0.34), rough=0.95)
+    fire = mat("Fire", (1.0, 0.55, 0.15), rough=0.5, emit=(1.0, 0.45, 0.1), emit_strength=6.0)
+    soot = mat("Soot", (0.08, 0.07, 0.07), rough=1.0)
+    rnd = random.Random(21)
+    parts = []
+    for row in range(5):
+        for i in range(8):
+            a = i / 8 * math.tau + row * 0.4
+            o = prim("cube", (math.cos(a) * 0.48, math.sin(a) * 0.48, 0.1 + row * 0.19), (0.3, 0.24, 0.18),
+                     (0, 0, a), m=stone if (i + row) % 3 else dark, bevel=0.03, angle=0.5)
+            jitter(o, 0.012, seed=row * 10 + i)
+            parts.append(o)
+    parts.append(prim("cyl", (0, 0, 0.5), (0.85, 0.85, 1.0), m=soot, seg=16))
+    parts.append(prim("cube", (0, 0.42, 0.33), (0.36, 0.2, 0.3), m=fire))
+    parts.append(prim("cube", (0, 0.46, 0.55), (0.48, 0.12, 0.08), m=dark, bevel=0.02, angle=0.5))
+    parts.append(limb((0, 0, 1.0), (0, 0, 1.6), 0.17, dark, seg=10, r_end=0.13))
+    parts.append(prim("torus", (0, 0, 1.6), (0.3, 0.3, 0.5), m=stone, seg=12, r2=0.2))
+    export(os.path.join(OUT, "furnace.glb"), [join(parts, "Furnace")])
+
+    # 工業用製炉(鉄の箱に煙突と配管)
+    reset()
+    steel = mat("Steel", (0.55, 0.58, 0.63), rough=0.4, metal=0.9)
+    plate = mat("SteelDark", (0.32, 0.35, 0.4), rough=0.5, metal=0.8)
+    hazard = mat("Hazard", (0.95, 0.72, 0.12), rough=0.6)
+    fire = mat("Fire", (1.0, 0.55, 0.15), rough=0.5, emit=(1.0, 0.45, 0.1), emit_strength=6.0)
+    parts = [
+        prim("cube", (0, 0, 0.7), (1.6, 1.2, 1.4), m=steel, bevel=0.04, angle=0.5),
+        prim("cube", (0, 0, 0.06), (1.75, 1.35, 0.12), m=plate, bevel=0.02, angle=0.5),
+        prim("cube", (0, 0.61, 0.55), (0.7, 0.04, 0.5), m=fire),
+        prim("cube", (0, 0.63, 0.88), (0.9, 0.06, 0.08), m=hazard),
+        prim("cube", (0, 0.63, 0.24), (0.9, 0.06, 0.08), m=hazard),
+        limb((0.45, -0.2, 1.4), (0.45, -0.2, 2.6), 0.16, plate, seg=12),
+        limb((-0.45, -0.25, 1.4), (-0.45, -0.25, 2.2), 0.12, plate, seg=12),
+        limb((-0.82, 0.3, 0.4), (-0.82, 0.3, 1.2), 0.07, steel, seg=10),
+        limb((-0.82, 0.3, 1.2), (-0.3, 0.3, 1.45), 0.07, steel, seg=10),
+    ]
+    for z in (2.0, 2.5):
+        parts.append(prim("torus", (0.45, -0.2, z), (0.36, 0.36, 0.5), m=hazard, seg=16, r2=0.15))
+    for x in (-0.6, 0.6):
+        parts.append(prim("cyl", (x, 0.62, 1.2), (0.12, 0.12, 0.05), (R(90), 0, 0), m=hazard, seg=16))
+    export(os.path.join(OUT, "industrial_furnace.glb"), [join(parts, "IndustrialFurnace")])
+
+    # 旋盤(作業台の上に回転する主軸)
+    reset()
+    steel = mat("Steel", (0.62, 0.65, 0.7), rough=0.35, metal=0.9)
+    blue = mat("MachineBlue", (0.2, 0.42, 0.72), rough=0.5)
+    dark = mat("SteelDark", (0.25, 0.27, 0.3), rough=0.5, metal=0.7)
+    hazard = mat("Hazard", (0.95, 0.72, 0.12), rough=0.6)
+    parts = [
+        prim("cube", (0, 0, 0.42), (1.7, 0.6, 0.84), m=blue, bevel=0.03, angle=0.5),
+        prim("cube", (0, 0, 0.88), (1.6, 0.4, 0.08), m=dark),
+        prim("cube", (-0.6, 0, 1.12), (0.42, 0.46, 0.44), m=blue, bevel=0.03, angle=0.5),
+        prim("cube", (0.62, 0, 1.06), (0.26, 0.3, 0.3), m=blue, bevel=0.02, angle=0.5),
+        limb((-0.39, 0, 1.12), (0.49, 0, 1.12), 0.035, steel, seg=12),
+        prim("cyl", (-0.35, 0, 1.12), (0.22, 0.22, 0.1), (0, R(90), 0), m=steel, seg=20),
+        prim("cube", (0.1, 0.12, 1.0), (0.2, 0.14, 0.14), m=dark),
+        prim("cube", (0, 0.31, 0.6), (1.5, 0.02, 0.05), m=hazard),
+    ]
+    for x in (-0.55, 0.3):
+        parts.append(prim("cyl", (x, 0.33, 0.6), (0.14, 0.14, 0.04), (R(90), 0, 0), m=steel, seg=16))
+    export(os.path.join(OUT, "lathe.glb"), [join(parts, "Lathe")])
+
+    # 発射台
+    reset()
+    concrete = mat("Concrete", (0.6, 0.6, 0.58), rough=0.95)
+    steel = mat("Steel", (0.55, 0.58, 0.63), rough=0.4, metal=0.9)
+    hazard = mat("Hazard", (0.95, 0.72, 0.12), rough=0.6)
+    soot = mat("Soot", (0.15, 0.14, 0.14), rough=1.0)
+    parts = [
+        prim("cyl", (0, 0, 0.2), (5.0, 5.0, 0.4), m=concrete, seg=24),
+        prim("cyl", (0, 0, 0.41), (2.2, 2.2, 0.02), m=soot, seg=24),
+        prim("torus", (0, 0, 0.41), (4.7, 4.7, 0.2), m=hazard, seg=32, r2=0.03),
+    ]
+    # 支えの塔
+    for z in range(9):
+        parts.append(prim("cube", (1.9, 0, 0.6 + z * 0.9), (0.5, 0.5, 0.08), m=steel))
+    for x in (1.68, 2.12):
+        for y in (-0.22, 0.22):
+            parts.append(limb((x, y, 0.4), (x, y, 8.4), 0.05, steel, seg=8))
+    parts.append(prim("cube", (1.35, 0, 6.0), (1.1, 0.2, 0.12), m=hazard))
+    export(os.path.join(OUT, "launch_pad.glb"), [join(parts, "LaunchPad")])
+
+    # ロケット
+    reset()
+    white = mat("Hull", (0.92, 0.93, 0.95), rough=0.4, metal=0.2)
+    red = mat("RocketRed", (0.82, 0.22, 0.18), rough=0.5)
+    dark = mat("SteelDark", (0.25, 0.27, 0.3), rough=0.4, metal=0.8)
+    glass = mat("Window", (0.3, 0.6, 0.85), rough=0.05, metal=0.5)
+    parts = [
+        prim("cyl", (0, 0, 3.0), (1.3, 1.3, 4.6), m=white, seg=32),
+        prim("cyl", (0, 0, 2.2), (1.32, 1.32, 0.25), m=red, seg=32),
+        prim("cyl", (0, 0, 4.4), (1.32, 1.32, 0.12), m=dark, seg=32),
+        prim("cone", (0, 0, 6.2), (1.3, 1.3, 1.8), m=red, seg=32),
+        prim("cyl", (0, 0.62, 4.9), (0.36, 0.36, 0.1), (R(90), 0, 0), m=glass, seg=24),
+        prim("torus", (0, 0.64, 4.9), (0.38, 0.38, 0.6), (R(90), 0, 0), m=dark, seg=24, r2=0.15),
+        prim("cone", (0, 0, 0.45), (1.0, 1.0, 0.7), m=dark, seg=24, r2=0.25),
+    ]
+    for i in range(4):
+        a = i / 4 * math.tau + math.pi / 4
+        fin = extrude_poly([(0.6, 0.6), (1.3, 0.3), (1.3, 1.0), (0.6, 2.2)], 0.06, red)
+        fin.rotation_euler = (0, 0, a - math.pi / 2)
+        activate(fin)
+        bpy.ops.object.transform_apply(rotation=True)
+        parts.append(fin)
+    export(os.path.join(OUT, "rocket.glb"), [join(parts, "Rocket")])
+
+
+def make_furniture():
+    """松明・ランタン・テーブル・椅子・ベッド・収納箱"""
+    reset()
+    wood = mat("Wood", (0.55, 0.36, 0.2), rough=0.8)
+    flame = mat("Flame", (1.0, 0.7, 0.2), rough=0.5, emit=(1.0, 0.6, 0.15), emit_strength=8.0)
+    parts = [limb((0, 0, 0), (0, 0, 1.2), 0.035, wood, seg=8),
+             prim("cyl", (0, 0, 1.2), (0.12, 0.12, 0.12), m=mat("Cloth", (0.3, 0.22, 0.15), rough=1.0), seg=10),
+             prim("sphere", (0, 0, 1.33), (0.13, 0.13, 0.22), m=flame, seg=10, rings=8)]
+    export(os.path.join(OUT, "torch.glb"), [join(parts, "Torch")])
+
+    reset()
+    iron = mat("Iron", (0.3, 0.3, 0.32), rough=0.4, metal=0.9)
+    glow = mat("LanternGlow", (1.0, 0.85, 0.5), rough=0.2, emit=(1.0, 0.8, 0.4), emit_strength=6.0)
+    parts = [limb((0, 0, 0), (0, 0, 1.5), 0.04, iron, seg=8),
+             prim("cube", (0, 0, 1.62), (0.24, 0.24, 0.3), m=glow),
+             prim("cube", (0, 0, 1.79), (0.3, 0.3, 0.05), m=iron),
+             prim("cube", (0, 0, 1.46), (0.3, 0.3, 0.04), m=iron)]
+    for x in (-0.12, 0.12):
+        for y in (-0.12, 0.12):
+            parts.append(prim("cube", (x, y, 1.62), (0.03, 0.03, 0.32), m=iron))
+    export(os.path.join(OUT, "lantern.glb"), [join(parts, "Lantern")])
+
+    reset()
+    wood = mat("Wood", (0.7, 0.5, 0.3), rough=0.8)
+    leg = mat("WoodDark", (0.48, 0.32, 0.18), rough=0.85)
+    parts = [prim("cube", (0, 0, 0.75), (1.2, 0.75, 0.06), m=wood, bevel=0.01, angle=0.5)]
+    for x in (-0.52, 0.52):
+        for y in (-0.3, 0.3):
+            parts.append(prim("cube", (x, y, 0.36), (0.07, 0.07, 0.72), m=leg))
+    export(os.path.join(OUT, "table.glb"), [join(parts, "Table")])
+
+    reset()
+    wood = mat("Wood", (0.7, 0.5, 0.3), rough=0.8)
+    leg = mat("WoodDark", (0.48, 0.32, 0.18), rough=0.85)
+    parts = [prim("cube", (0, 0, 0.45), (0.46, 0.46, 0.05), m=wood, bevel=0.01, angle=0.5),
+             prim("cube", (0, -0.21, 0.78), (0.46, 0.04, 0.6), m=wood, bevel=0.01, angle=0.5)]
+    for x in (-0.19, 0.19):
+        for y in (-0.19, 0.19):
+            parts.append(prim("cube", (x, y, 0.22), (0.05, 0.05, 0.44), m=leg))
+    export(os.path.join(OUT, "chair.glb"), [join(parts, "Chair")])
+
+    reset()
+    wood = mat("WoodDark", (0.48, 0.32, 0.18), rough=0.85)
+    sheet = mat("Sheet", (0.92, 0.92, 0.88), rough=0.9)
+    blanket = mat("Blanket", (0.3, 0.48, 0.75), rough=0.9)
+    parts = [prim("cube", (0, 0, 0.22), (1.0, 2.0, 0.24), m=wood, bevel=0.02, angle=0.5),
+             prim("cube", (0, 0, 0.4), (0.92, 1.92, 0.14), m=sheet, bevel=0.04, subsurf=1),
+             prim("cube", (0, -0.25, 0.45), (0.96, 1.4, 0.1), m=blanket, bevel=0.03, subsurf=1),
+             prim("cube", (0, 0.72, 0.52), (0.6, 0.3, 0.12), m=sheet, bevel=0.05, subsurf=1),
+             prim("cube", (0, 1.0, 0.5), (1.0, 0.08, 0.8), m=wood, bevel=0.02, angle=0.5)]
+    export(os.path.join(OUT, "bed.glb"), [join(parts, "Bed")])
+
+    reset()
+    wood = mat("Wood", (0.62, 0.42, 0.24), rough=0.8)
+    iron = mat("Iron", (0.3, 0.3, 0.32), rough=0.4, metal=0.9)
+    parts = [prim("cube", (0, 0, 0.3), (0.9, 0.55, 0.6), m=wood, bevel=0.02, angle=0.5),
+             prim("cube", (0, 0, 0.62), (0.94, 0.59, 0.06), m=wood, bevel=0.02, angle=0.5),
+             prim("cube", (0, 0.29, 0.5), (0.1, 0.03, 0.12), m=iron)]
+    for x in (-0.46, 0.46):
+        parts.append(prim("cube", (x, 0, 0.32), (0.03, 0.57, 0.64), m=iron))
+    export(os.path.join(OUT, "chest.glb"), [join(parts, "Chest")])
+
+
 if __name__ == "__main__":
-    make_pioneer()
-    make_fp_arm()
-    make_tools()
-    make_nature()
-    make_workbench()
+    only = sys.argv[sys.argv.index("--") + 2:] if "--" in sys.argv else []
+    steps = {"pioneer": make_pioneer, "fp_arm": make_fp_arm, "tools": make_tools, "nature": make_nature,
+             "workbench": make_workbench, "stations": make_stations, "furniture": make_furniture}
+    for name, fn in steps.items():
+        if not only or name in only:
+            fn()
     print("done")

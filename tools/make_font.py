@@ -9,7 +9,7 @@ from fontTools.varLib import instancer
 
 src = sys.argv[1]
 chars = set(chr(c) for c in range(0x20, 0x7F)) | set("0123456789:・→()!?、。ー〜")
-for p in glob.glob('scripts/*.gd'):
+for p in glob.glob('scripts/*.gd') + glob.glob('data/*.json'):
     chars |= set(open(p, encoding='utf-8').read())
 chars = ''.join(sorted(c for c in chars if c >= ' '))
 with tempfile.TemporaryDirectory() as d:

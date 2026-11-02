@@ -1,31 +1,13 @@
 class_name Inventory
 extends RefCounted
 ## 持ち物。先頭の6枠がアイテム欄(ホットバー)、残りがかばん。素材は1枠に100個まで重なる。
+## アイテムとレシピの定義は data/items.json(ItemDB)にある。
 
 signal changed
 
 const HOTBAR_SIZE := 6
 const BAG_SIZE := 18
 const SIZE := HOTBAR_SIZE + BAG_SIZE
-
-## アイテムの定義。stack は1枠に入る最大数、tool は手に持って使う道具、place は地面に設置できる物
-const ITEMS := {
-	"axe": {"name": "石の斧", "stack": 1, "tool": true},
-	"pickaxe": {"name": "石のツルハシ", "stack": 1, "tool": true},
-	"workbench": {"name": "作業台", "stack": 10, "place": true},
-	"wood": {"name": "木材", "stack": 100},
-	"stone": {"name": "石", "stack": 100},
-	"iron": {"name": "鉄鉱石", "stack": 100},
-	"copper": {"name": "銅鉱石", "stack": 100},
-	"crystal": {"name": "結晶", "stack": 100},
-}
-
-## クラフトの作り方(持ち物画面の左に並ぶ順)
-const RECIPES := [
-	{"id": "workbench", "count": 1, "cost": {"wood": 6, "stone": 6, "iron": 6}},
-	{"id": "pickaxe", "count": 1, "cost": {"wood": 3, "stone": 3}},
-	{"id": "axe", "count": 1, "cost": {"wood": 3, "stone": 3}},
-]
 
 ## 各枠は {} (空) か {"id": String, "count": int}
 var slots: Array[Dictionary] = []
@@ -37,20 +19,20 @@ func _init() -> void:
 
 
 static func item_name(id: String) -> String:
-	return ITEMS[id]["name"] if ITEMS.has(id) else ""
+	return ItemDB.item_name(id)
 
 
 static func is_tool_item(id: String) -> bool:
-	return ITEMS.has(id) and ITEMS[id].get("tool", false)
+	return ItemDB.tool_kind(id) != ""
 
 
 static func is_placeable(id: String) -> bool:
-	return ITEMS.has(id) and ITEMS[id].get("place", false)
+	return ItemDB.place_kind(id) != ""
 
 
 ## 入れられなかった数を返す(持ち物がいっぱいのとき 0 より大きい)
 func add(id: String, count: int) -> int:
-	var max_stack: int = ITEMS[id]["stack"]
+	var max_stack := ItemDB.stack(id)
 	# まず同じ素材の枠に重ねる(アイテム欄 → かばんの順)
 	for s in slots:
 		if count <= 0:
@@ -90,8 +72,7 @@ func move(from: int, to: int) -> void:
 	var a := slots[from]
 	var b := slots[to]
 	if not a.is_empty() and not b.is_empty() and a["id"] == b["id"]:
-		var max_stack: int = ITEMS[a["id"]]["stack"]
-		var n := mini(a["count"], max_stack - b["count"])
+		var n := mini(a["count"], ItemDB.stack(a["id"]) - b["count"])
 		b["count"] += n
 		a["count"] -= n
 		if a["count"] <= 0:
@@ -104,7 +85,7 @@ func move(from: int, to: int) -> void:
 
 ## 入りきる数(重ねられる分 + 空き枠)
 func space_for(id: String) -> int:
-	var max_stack: int = ITEMS[id]["stack"]
+	var max_stack := ItemDB.stack(id)
 	var n := 0
 	for s in slots:
 		if s.is_empty():
@@ -114,7 +95,7 @@ func space_for(id: String) -> int:
 	return n
 
 
-## 取り除けなかった数を返す。アイテム欄より後ろ(かばん)から先に使う
+## 取り除けなかった数を返す。かばん(後ろの枠)から先に使う
 func remove(id: String, count: int) -> int:
 	for i in range(SIZE - 1, -1, -1):
 		if count <= 0:
@@ -132,25 +113,39 @@ func remove(id: String, count: int) -> int:
 
 func can_afford(cost: Dictionary) -> bool:
 	for k in cost:
-		if total(k) < cost[k]:
+		if total(k) < int(cost[k]):
 			return false
 	return true
 
 
-## 作れたら ""、作れなければ理由を返す
+func missing_text(cost: Dictionary) -> String:
+	var need := []
+	for k in cost:
+		var short := int(cost[k]) - total(k)
+		if short > 0:
+			need.append("%s があと %d" % [item_name(k), short])
+	return "素材が足りない(%s)" % "、".join(need)
+
+
+## 素材を払う。払えなければ false
+func pay(cost: Dictionary) -> bool:
+	if not can_afford(cost):
+		return false
+	for k in cost:
+		remove(k, int(cost[k]))
+	return true
+
+
+## その場で作る(手元・作業台・旋盤)。作れたら ""、作れなければ理由を返す
 func craft(recipe: Dictionary) -> String:
 	var cost: Dictionary = recipe["cost"]
 	if not can_afford(cost):
-		var need := []
+		return missing_text(cost)
+	pay(cost)
+	var count := int(recipe["count"])
+	if space_for(recipe["id"]) < count:
 		for k in cost:
-			if total(k) < cost[k]:
-				need.append("%s があと %d" % [item_name(k), cost[k] - total(k)])
-		return "素材が足りない(%s)" % "、".join(need)
-	for k in cost:
-		remove(k, cost[k])
-	if space_for(recipe["id"]) < recipe["count"]:
-		for k in cost:
-			add(k, cost[k])
+			add(k, int(cost[k]))
 		return "持ち物がいっぱいで受け取れない"
-	add(recipe["id"], recipe["count"])
+	add(recipe["id"], count)
 	return ""

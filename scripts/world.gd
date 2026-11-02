@@ -6,7 +6,9 @@ const SIZE := 256.0          ## 地形の一辺(m)
 const CELLS := 128           ## 一辺の分割数
 const WATER_LEVEL := -0.8
 const LAKE_CENTER := Vector2(-48.0, 34.0)
-const LAKE_RADIUS := 20.0
+const LAKE_RADIUS := 22.0
+const LAKE_DEPTH := 4.0
+const ISLAND := Vector3(-43.0, 29.0, 3.8)   ## 湖の小島(x, z, 半径)
 const PEAKS := [
 	# x, z, 半径, 高さ
 	Vector4(62.0, -55.0, 34.0, 24.0),
@@ -17,6 +19,7 @@ const PEAKS := [
 var noise := FastNoiseLite.new()
 var detail := FastNoiseLite.new()
 var ridge := FastNoiseLite.new()
+var lake_noise := FastNoiseLite.new()
 var sun: DirectionalLight3D
 
 
@@ -31,6 +34,8 @@ func build(seed_value: int) -> void:
 	ridge.frequency = 0.025
 	ridge.fractal_type = FastNoiseLite.FRACTAL_RIDGED
 	ridge.fractal_octaves = 4
+	lake_noise.seed = seed_value + 3
+	lake_noise.frequency = 0.9
 
 	_make_environment()
 	_make_terrain()
@@ -58,10 +63,28 @@ func height_at(x: float, z: float) -> float:
 		if t > 0.0:
 			h += t * t * (pk.w * (0.75 + (ridge.get_noise_2d(x * 1.3, z * 1.3) + 1.0) * 0.3))
 
-	# 湖
-	var ld := p.distance_to(LAKE_CENTER)
-	h -= (1.0 - smoothstep(LAKE_RADIUS * 0.4, LAKE_RADIUS, ld)) * 3.2
+	# 湖(岸の形はノイズでいびつに)と小島
+	var lf := lake_factor(x, z)
+	if lf > 0.0:
+		h = lerpf(h, WATER_LEVEL - LAKE_DEPTH, smoothstep(0.0, 1.0, lf))
+		var id := p.distance_to(Vector2(ISLAND.x, ISLAND.y))
+		h += (1.0 - smoothstep(ISLAND.z * 0.4, ISLAND.z * 1.6, id)) * (LAKE_DEPTH + 1.3)
 	return h
+
+
+## 湖の中心に近いほど 1、岸の外は 0
+func lake_factor(x: float, z: float) -> float:
+	var v := Vector2(x, z) - LAKE_CENTER
+	var d := v.length()
+	if d > LAKE_RADIUS * 1.5:
+		return 0.0
+	var dir := v / maxf(d, 0.001)
+	var r := LAKE_RADIUS * (1.0 + lake_noise.get_noise_2d(dir.x * 2.0, dir.y * 2.0) * 0.45)
+	return 1.0 - smoothstep(r * 0.45, r, d)
+
+
+func in_lake(x: float, z: float) -> bool:
+	return lake_factor(x, z) > 0.0 and height_at(x, z) < WATER_LEVEL
 
 
 func normal_at(x: float, z: float) -> Vector3:
@@ -81,7 +104,7 @@ func surface(x: float, z: float) -> Vector3:
 func zone_at(x: float, z: float) -> String:
 	var h := height_at(x, z)
 	var slope := 1.0 - normal_at(x, z).y
-	if h < WATER_LEVEL + 0.4:
+	if lake_factor(x, z) > 0.0 and h < WATER_LEVEL + 0.4:
 		return "water"
 	if h > 9.0 or slope > 0.28:
 		return "mountain"
@@ -160,19 +183,212 @@ func _make_terrain() -> void:
 
 
 func _make_water() -> void:
+	# 湖の深さを画像に焼き込んで、水面の色(浅い所は明るく、深い所は濃く)と岸の白い泡に使う
+	var extent := LAKE_RADIUS * 3.2
+	var res := 128
+	var img := Image.create(res, res, false, Image.FORMAT_RF)
+	for iy in res:
+		for ix in res:
+			var x := LAKE_CENTER.x + (float(ix) / (res - 1) - 0.5) * extent
+			var z := LAKE_CENTER.y + (float(iy) / (res - 1) - 0.5) * extent
+			var depth := 0.0
+			if lake_factor(x, z) > 0.0:
+				depth = clampf((WATER_LEVEL - height_at(x, z)) / LAKE_DEPTH, -1.0, 1.0)
+			img.set_pixel(ix, iy, Color(depth, 0, 0))
+	var depth_tex := ImageTexture.create_from_image(img)
+
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/water.gdshader")
+	mat.set_shader_parameter("depth_tex", depth_tex)
+	var n1 := NoiseTexture2D.new()
+	n1.seamless = true
+	n1.as_normal_map = true
+	n1.bump_strength = 6.0
+	n1.width = 256
+	n1.height = 256
+	var fn := FastNoiseLite.new()
+	fn.frequency = 0.02
+	n1.noise = fn
+	mat.set_shader_parameter("wave_normal", n1)
+
 	var water := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(LAKE_RADIUS * 2.6, LAKE_RADIUS * 2.6)
+	plane.size = Vector2(extent, extent)
+	plane.subdivide_width = 48
+	plane.subdivide_depth = 48
 	water.mesh = plane
-	water.position = Vector3(LAKE_CENTER.x, WATER_LEVEL, LAKE_CENTER.y)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.2, 0.5, 0.75, 0.75)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.roughness = 0.05
-	mat.metallic_specular = 1.0
 	water.material_override = mat
+	water.position = Vector3(LAKE_CENTER.x, WATER_LEVEL, LAKE_CENTER.y)
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(water)
+
+
+## 湖のまわりの飾り: 葦・スイレン・岸の石・桟橋
+func make_lake_details(rng: RandomNumberGenerator) -> void:
+	add_child(_reeds(rng))
+	add_child(_lily_pads(rng))
+	add_child(_shore_stones(rng))
+	_make_pier()
+
+
+func _shore_points(rng: RandomNumberGenerator, count: int, min_h: float, max_h: float) -> Array[Vector3]:
+	var pts: Array[Vector3] = []
+	var tries := 0
+	while pts.size() < count and tries < count * 40:
+		tries += 1
+		var a := rng.randf() * TAU
+		var r := sqrt(rng.randf()) * LAKE_RADIUS * 1.5
+		var x := LAKE_CENTER.x + cos(a) * r
+		var z := LAKE_CENTER.y + sin(a) * r
+		var h := height_at(x, z)
+		if lake_factor(x, z) <= 0.0 and h > WATER_LEVEL + 0.4:
+			continue
+		if h - WATER_LEVEL >= min_h and h - WATER_LEVEL <= max_h:
+			pts.append(Vector3(x, h, z))
+	return pts
+
+
+func _reeds(rng: RandomNumberGenerator) -> MultiMeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var green := Color(0.32, 0.5, 0.22)
+	var tip := Color(0.55, 0.68, 0.32)
+	for i in 6:
+		var a := i * TAU / 6.0 + 0.3 * i
+		var off := Vector3(cos(a), 0, sin(a)) * 0.12
+		var h := 1.1 + 0.35 * (i % 3)
+		var lean := Vector3(cos(a), 0, sin(a)) * 0.15
+		var w := Vector3(-sin(a), 0, cos(a)) * 0.025
+		st.set_color(green); st.add_vertex(off - w)
+		st.set_color(green); st.add_vertex(off + w)
+		st.set_color(tip); st.add_vertex(off + lean + Vector3(0, h, 0))
+	# ガマの穂
+	for i in 2:
+		var c := Vector3(0.05 - i * 0.1, 1.25 + i * 0.2, 0.03)
+		for f in [[Vector3(-0.03, 0, 0), Vector3(0.03, 0, 0)], [Vector3(0, 0, -0.03), Vector3(0, 0, 0.03)]]:
+			var brown := Color(0.42, 0.26, 0.14)
+			st.set_color(brown); st.add_vertex(c + f[0])
+			st.set_color(brown); st.add_vertex(c + f[1])
+			st.set_color(brown); st.add_vertex(c + f[1] + Vector3(0, 0.22, 0))
+			st.set_color(brown); st.add_vertex(c + f[0])
+			st.set_color(brown); st.add_vertex(c + f[1] + Vector3(0, 0.22, 0))
+			st.set_color(brown); st.add_vertex(c + f[0] + Vector3(0, 0.22, 0))
+	st.generate_normals()
+	return _scatter(st.commit(), _shore_points(rng, 260, -0.7, 0.35), rng, 0.8, 1.3, true)
+
+
+func _lily_pads(rng: RandomNumberGenerator) -> MultiMeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var c := Color(0.25, 0.5, 0.2)
+	var seg := 14
+	for i in seg - 1:  # 1か所切れ込みのある円
+		var a0 := (i + 0.5) * TAU / seg
+		var a1 := (i + 1.5) * TAU / seg
+		st.set_color(c); st.add_vertex(Vector3.ZERO)
+		st.set_color(c); st.add_vertex(Vector3(cos(a1), 0, sin(a1)) * 0.38)
+		st.set_color(c); st.add_vertex(Vector3(cos(a0), 0, sin(a0)) * 0.38)
+	st.generate_normals()
+	var pads := _shore_points(rng, 90, -2.0, -0.4)
+	for i in pads.size():
+		pads[i].y = WATER_LEVEL + 0.02
+	var mmi := _scatter(st.commit(), pads, rng, 0.7, 1.4, false)
+	# ところどころに花
+	for i in range(0, pads.size(), 6):
+		var flower := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.09
+		sm.height = 0.12
+		flower.mesh = sm
+		var fm := StandardMaterial3D.new()
+		fm.albedo_color = Color(1.0, 0.7, 0.85) if i % 12 else Color(1, 1, 0.95)
+		flower.material_override = fm
+		flower.position = pads[i] + Vector3(0.05, 0.05, 0.05)
+		add_child(flower)
+	return mmi
+
+
+func _shore_stones(rng: RandomNumberGenerator) -> MultiMeshInstance3D:
+	var sm := SphereMesh.new()
+	sm.radius = 0.28
+	sm.height = 0.26
+	sm.radial_segments = 7
+	sm.rings = 4
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.36, 0.34, 0.31)
+	m.roughness = 0.95
+	sm.material = m
+	return _scatter(sm, _shore_points(rng, 70, -0.3, 0.5), rng, 0.5, 1.3, false)
+
+
+func _scatter(mesh: Mesh, pts: Array[Vector3], rng: RandomNumberGenerator, smin: float, smax: float, use_vc: bool) -> MultiMeshInstance3D:
+	if mesh.get_surface_count() > 0 and mesh.surface_get_material(0) == null:
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = use_vc
+		m.vertex_color_is_srgb = true
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.roughness = 0.9
+		mesh.surface_set_material(0, m)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = pts.size()
+	for i in pts.size():
+		var s := rng.randf_range(smin, smax)
+		mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.8, 1.2), s)), pts[i]))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mmi
+
+
+## 草原側の岸から湖へ伸びる木の桟橋(歩ける)
+func _make_pier() -> void:
+	var dir := (-LAKE_CENTER).normalized()
+	# 岸(水面と同じ高さになる所)を探す
+	var start := LAKE_CENTER
+	for i in 200:
+		var p := LAKE_CENTER + dir * (i * 0.25)
+		if height_at(p.x, p.y) > WATER_LEVEL + 0.3:
+			start = p
+			break
+	var length := 9.0
+	var deck_y := WATER_LEVEL + 0.55
+	var body := StaticBody3D.new()
+	body.collision_layer = 1
+	add_child(body)
+	var yaw := atan2(dir.x, dir.y)
+	var center := start - dir * (length / 2.0 - 1.0)
+	body.global_transform = Transform3D(Basis(Vector3.UP, yaw), Vector3(center.x, deck_y, center.y))
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.6, 0.42, 0.26)
+	wood.roughness = 0.85
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.38, 0.26, 0.15)
+	for i in int(length / 0.32):
+		var plank := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(1.8, 0.07, 0.29)
+		plank.mesh = bm
+		plank.material_override = wood if i % 3 else dark
+		plank.position = Vector3(0, 0, -length / 2.0 + 0.16 + i * 0.32)
+		body.add_child(plank)
+	for zi in 4:
+		for x in [-0.85, 0.85]:
+			var post := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.09
+			cm.bottom_radius = 0.1
+			cm.height = 3.6
+			post.mesh = cm
+			post.material_override = dark
+			post.position = Vector3(x, -1.6, -length / 2.0 + 0.3 + zi * (length - 0.6) / 3.0)
+			body.add_child(post)
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.8, 0.1, length)
+	col.shape = shape
+	body.add_child(col)
 
 
 func _make_environment() -> void:

@@ -38,6 +38,8 @@ func _process(_delta: float) -> bool:
 	var p: Player = main.player
 	match stage:
 		0:
+			if frames == 2:
+				main._start_game()
 			if frames > 5:
 				target = _face(true)
 				main._select_slot(0)  # 斧
