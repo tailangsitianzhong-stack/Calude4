@@ -7,10 +7,14 @@ var station_id := ""
 var queue: Array[Dictionary] = []   ## {recipe, left}
 var progress := 0.0                 ## いま作っている物の進み具合(秒)
 var blocked := false                ## 持ち物がいっぱいで受け取れず止まっている
+var storage: Inventory              ## 収納箱の中身(収納箱のときだけ)
 var _light: OmniLight3D
 
 
 func _ready() -> void:
+	var n := int(ItemDB.item(station_id).get("storage", 0))
+	if n > 0:
+		storage = Inventory.new(n)
 	if ItemDB.is_timed(station_id):
 		_light = OmniLight3D.new()
 		_light.light_color = Color(1.0, 0.55, 0.2)
@@ -41,7 +45,10 @@ func enqueue(recipe: Dictionary, times: int) -> void:
 func tick(delta: float, inv: Inventory) -> Dictionary:
 	var working := not queue.is_empty() and not blocked
 	if _light:
-		_light.light_energy = (1.6 + sin(Time.get_ticks_msec() * 0.012) * 0.3) if working else 0.25
+		# 動いていないときは明かりを消す(明かりが多いとスマホで重くなる)
+		_light.visible = working
+		if working:
+			_light.light_energy = 1.6 + sin(Time.get_ticks_msec() * 0.012) * 0.3
 	if queue.is_empty():
 		return {}
 	var job: Dictionary = queue[0]
@@ -65,9 +72,18 @@ func tick(delta: float, inv: Inventory) -> Dictionary:
 	return {"id": r["id"], "count": count}
 
 
-## 回収するとき、まだ作っていない分の素材を返す
-func refund(inv: Inventory) -> void:
+## 回収するとき、まだ作っていない分の素材と、収納箱の中身を返す。入りきらなければ false
+func refund(inv: Inventory) -> bool:
+	if storage:
+		for s in storage.slots:
+			if not s.is_empty() and inv.space_for(s["id"]) < s["count"]:
+				return false
+		for s in storage.slots:
+			if not s.is_empty():
+				inv.add(s["id"], s["count"])
+		storage = Inventory.new(storage.slots.size())
 	for q in queue:
 		for k in q["recipe"]["cost"]:
 			inv.add(k, int(q["recipe"]["cost"][k]) * q["left"])
 	queue.clear()
+	return true

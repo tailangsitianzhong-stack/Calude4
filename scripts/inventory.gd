@@ -13,8 +13,8 @@ const SIZE := HOTBAR_SIZE + BAG_SIZE
 var slots: Array[Dictionary] = []
 
 
-func _init() -> void:
-	for i in SIZE:
+func _init(size := SIZE) -> void:
+	for i in size:
 		slots.append({})
 
 
@@ -42,7 +42,7 @@ func add(id: String, count: int) -> int:
 			s["count"] += n
 			count -= n
 	# 残りは空いている枠へ
-	for i in SIZE:
+	for i in slots.size():
 		if count <= 0:
 			break
 		if slots[i].is_empty():
@@ -62,7 +62,7 @@ func total(id: String) -> int:
 
 
 func id_at(i: int) -> String:
-	return slots[i].get("id", "") if i >= 0 and i < SIZE else ""
+	return slots[i].get("id", "") if i >= 0 and i < slots.size() else ""
 
 
 ## 2つの枠を入れ替える。同じ素材なら重ねられるだけ重ねる
@@ -83,6 +83,34 @@ func move(from: int, to: int) -> void:
 	changed.emit()
 
 
+## 別の持ち物(収納箱など)との間で枠を入れ替える
+static func move_between(a: Inventory, i: int, b: Inventory, j: int) -> void:
+	if a == b:
+		a.move(i, j)
+		return
+	var x := a.slots[i]
+	var y := b.slots[j]
+	if not x.is_empty() and not y.is_empty() and x["id"] == y["id"]:
+		var n := mini(x["count"], ItemDB.stack(x["id"]) - y["count"])
+		y["count"] += n
+		x["count"] -= n
+		if x["count"] <= 0:
+			a.slots[i] = {}
+	else:
+		a.slots[i] = y
+		b.slots[j] = x
+	a.changed.emit()
+	b.changed.emit()
+
+
+## 装備の効果(持っているだけで効く)
+func has_gear(effect: String) -> bool:
+	for s in slots:
+		if not s.is_empty() and ItemDB.item(s["id"]).get("gear", "") == effect:
+			return true
+	return false
+
+
 ## 入りきる数(重ねられる分 + 空き枠)
 func space_for(id: String) -> int:
 	var max_stack := ItemDB.stack(id)
@@ -97,7 +125,7 @@ func space_for(id: String) -> int:
 
 ## 取り除けなかった数を返す。かばん(後ろの枠)から先に使う
 func remove(id: String, count: int) -> int:
-	for i in range(SIZE - 1, -1, -1):
+	for i in range(slots.size() - 1, -1, -1):
 		if count <= 0:
 			break
 		var s := slots[i]
@@ -148,4 +176,7 @@ func craft(recipe: Dictionary) -> String:
 			add(k, int(cost[k]))
 		return "持ち物がいっぱいで受け取れない"
 	add(recipe["id"], count)
+	# バケツを使うレシピは、空のバケツが戻ってくる
+	for k in recipe.get("returns", {}):
+		add(k, int(recipe["returns"][k]))
 	return ""

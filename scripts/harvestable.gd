@@ -23,23 +23,48 @@ func setup(kind_id: String, def: Dictionary, scene: PackedScene, rng: RandomNumb
 	tool = def["tool"]
 	tier = def.get("tier", 1)
 	add_to_group("harvestable")
-	max_hp = def["hp"]
-	hp = max_hp
-	drops = def["drop"]
 	is_tree = def.get("tree", false)
 	collision_layer = 4
 	collision_mask = 0
 
+	# 岩や鉱石は大きさがまちまち。大きいほど硬く、たくさん取れる
+	var size_mul := 1.0
+	var hp_mul := 1.0
+	var drop_mul := 1.0
+	if def.get("sizes", false):
+		var roll := rng.randf()
+		if roll < 0.3:
+			size_mul = 0.6; hp_mul = 0.6; drop_mul = 0.5
+			display_name = "小さな" + display_name
+		elif roll < 0.75:
+			pass
+		elif roll < 0.95:
+			size_mul = 1.5; hp_mul = 1.8; drop_mul = 2.0
+			display_name = "大きな" + display_name
+		else:
+			size_mul = 2.2; hp_mul = 3.0; drop_mul = 3.5
+			display_name = "巨大な" + display_name
+	max_hp = maxi(1, roundi(def["hp"] * hp_mul))
+	hp = max_hp
+	drops = {}
+	for k in def["drop"]:
+		drops[k] = maxi(1, ceili(def["drop"][k] * drop_mul))
+
 	model = scene.instantiate()
-	var s: float = rng.randf_range(def.get("min_scale", 0.85), def.get("max_scale", 1.2))
+	var s: float = rng.randf_range(def.get("min_scale", 0.85), def.get("max_scale", 1.2)) * size_mul
 	model.scale = Vector3.ONE * s
 	model.rotation.y = rng.randf() * TAU
 	add_child(model)
+	# 遠くの物は描かない(スマホで重くならないように)
+	var view: float = def.get("view", 170.0 if is_tree else 110.0) * maxf(size_mul, 1.0)
+	for g in model.find_children("*", "GeometryInstance3D", true, false):
+		(g as GeometryInstance3D).visibility_range_end = view
+		(g as GeometryInstance3D).visibility_range_end_margin = 10.0
 
 	var col := CollisionShape3D.new()
 	if is_tree:
 		var cyl := CylinderShape3D.new()
-		cyl.radius = 0.35 * s
+		cyl.radius = def.get("radius", 0.35) * s
 		cyl.height = 4.0 * s
 		col.shape = cyl
 		col.position.y = 2.0 * s
@@ -55,11 +80,12 @@ func setup(kind_id: String, def: Dictionary, scene: PackedScene, rng: RandomNumb
 func hit(tool_kind: String, power: int, tool_tier: int, from: Vector3) -> Dictionary:
 	if _dying:
 		return {"ok": false, "message": ""}
-	if tool_kind != tool:
+	if tool != "any" and tool_kind != tool:
 		var need := "斧" if tool == "axe" else "ツルハシ"
 		return {"ok": false, "message": "%sが必要(%sを選んでね)" % [need, need]}
 	if tool_tier < tier:
-		return {"ok": false, "message": "鉄の%sでないと掘れない" % ("斧" if tool == "axe" else "ツルハシ")}
+		var need := "鉄" if tier == 2 else "鋼鉄"
+		return {"ok": false, "message": "%sの%sでないと掘れない" % [need, "斧" if tool == "axe" else "ツルハシ"]}
 	hp -= power
 	_shake = 0.25
 	if hp <= 0:

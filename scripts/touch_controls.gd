@@ -41,6 +41,8 @@ var show_pickup := false
 var pickup_label := ""
 var use_target := {}            ## {label, pos} 近くの設備の「使う」ボタン
 var sensitivity := 1.0
+var oxygen := -1.0              ## 息(0〜1)。-1 なら出さない
+var temperature := -1.0         ## 体温(0〜100)。-1 なら出さない
 
 var panel := ""                 ## "" / "bag" / "settings"
 var station := "hand"           ## 持ち物画面の左に出すレシピの設備
@@ -57,6 +59,7 @@ var _attack_index := -1
 var _pressed := {}              ## タッチ番号 -> ボタンID
 var _key_attack := false
 var _held_slot := -1
+var _held_box := false           ## 選んでいる枠が収納箱の中か
 var _list_drag := {}            ## レシピ一覧のドラッグ {index, start, scroll, moved}
 var _slider_index := -1
 
@@ -119,6 +122,18 @@ func _bag_rect(i: int) -> Rect2:
 		row = (i - Inventory.HOTBAR_SIZE) / 6
 	return Rect2(p.position + Vector2(24.0 + col * (SLOT_SIZE + SLOT_GAP), 56.0 + row * (SLOT_SIZE + SLOT_GAP) + extra),
 		Vector2(SLOT_SIZE, SLOT_SIZE))
+
+
+func _storage() -> Inventory:
+	return station_node.storage if station_node else null
+
+
+func _box_rect(i: int) -> Rect2:
+	var c := _craft_panel()
+	var cols := 6
+	var size_px := 62.0
+	var x0 := c.position.x + (c.size.x - (cols * size_px + (cols - 1) * 6.0)) / 2.0
+	return Rect2(Vector2(x0 + (i % cols) * (size_px + 6.0), c.position.y + 60.0 + (i / cols) * (size_px + 6.0)), Vector2(size_px, size_px))
 
 
 func _close_rect() -> Rect2:
@@ -238,10 +253,14 @@ func _hit_test(p: Vector2) -> String:
 		for i in Inventory.SIZE:
 			if _bag_rect(i).has_point(p):
 				return "bag%d" % i
+		if _storage():
+			for i in _storage().slots.size():
+				if _box_rect(i).has_point(p):
+					return "box%d" % i
 		for i in _tabs().size():
-			if _tab_rect(i).has_point(p):
+			if _tab_rect(i).has_point(p) and not _storage():
 				return "tab%d" % i
-		if _list_area().has_point(p):
+		if _list_area().has_point(p) and not _storage():
 			return "list"
 		if _bag_panel().has_point(p) or _craft_panel().has_point(p):
 			return "panel"
@@ -296,7 +315,9 @@ func _press(id: String, index: int, pos: Vector2) -> void:
 				_tab = int(id.substr(3))
 				_scroll = 0.0
 			elif id.begins_with("bag"):
-				_tap_bag_slot(int(id.substr(3)))
+				_tap_slot(false, int(id.substr(3)))
+			elif id.begins_with("box"):
+				_tap_slot(true, int(id.substr(3)))
 
 
 func _set_slider(x: float) -> void:
@@ -318,12 +339,16 @@ func _release_list(pos: Vector2) -> void:
 				return
 
 
-func _tap_bag_slot(i: int) -> void:
+## 枠をタップ → 移動先の枠をタップで入れ替え(持ち物と収納箱のあいだでも動かせる)
+func _tap_slot(in_box: bool, i: int) -> void:
+	var inv := _storage() if in_box else inventory
 	if _held_slot == -1:
-		if inventory.id_at(i) != "":
+		if inv.id_at(i) != "":
 			_held_slot = i
+			_held_box = in_box
 	else:
-		inventory.move(_held_slot, i)
+		var from := _storage() if _held_box else inventory
+		Inventory.move_between(from, _held_slot, inv, i)
 		_held_slot = -1
 		slot_selected.emit(selected_slot)
 
@@ -447,6 +472,7 @@ func _draw() -> void:
 	if panel == "":
 		_draw_aim(font, center)
 		_draw_stick(font)
+		_draw_meters(font)
 		if not use_target.is_empty():
 			_draw_use_button(font)
 
@@ -519,7 +545,15 @@ func _draw_button_icon(font: Font, id: String, c: Vector2, r: float) -> void:
 		c += Vector2(0, -14)  # 下に文字を入れるので少し上へ
 	match id:
 		"attack":
-			if attack_label == "設置":
+			if attack_label in ["汲む", "まく"]:
+				draw_colored_polygon(PackedVector2Array([c + Vector2(-22, -14) * k, c + Vector2(22, -14) * k, c + Vector2(15, 22) * k, c + Vector2(-15, 22) * k]), w)
+				draw_arc(c + Vector2(0, -14) * k, 22 * k, PI, TAU, 16, w, 4.0 * k)
+			elif attack_label == "投げる":
+				for i in 3:
+					draw_rect(Rect2(c + Vector2(-16 + i * 11, -20) * k, Vector2(10, 38) * k), Color(0.9, 0.25, 0.2))
+				draw_line(c + Vector2(0, -20) * k, c + Vector2(8, -34) * k, w, 3.0 * k)
+				draw_circle(c + Vector2(9, -36) * k, 4 * k, Color(1.0, 0.8, 0.3))
+			elif attack_label == "設置":
 				# 下向きの矢印と、置かれる箱
 				draw_rect(Rect2(c + Vector2(-26, 8) * k, Vector2(52, 30) * k), w, false, 4.0 * k)
 				draw_line(c + Vector2(0, -36) * k, c + Vector2(0, -2) * k, w, 6.0 * k)
@@ -570,7 +604,10 @@ func _draw_button_icon(font: Font, id: String, c: Vector2, r: float) -> void:
 
 func _draw_bag(font: Font) -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.45))
-	_draw_craft(font)
+	if _storage():
+		_draw_storage(font)
+	else:
+		_draw_craft(font)
 	var p := _bag_panel()
 	draw_rect(p, C_PANEL)
 	draw_rect(p, C_LINE, false, 2.0)
@@ -580,14 +617,14 @@ func _draw_bag(font: Font) -> void:
 	draw_string(font, Vector2(cl.position.x, cl.position.y + 26), "×", HORIZONTAL_ALIGNMENT_CENTER, cl.size.x, 24, Color.WHITE)
 	for i in Inventory.SIZE:
 		_draw_slot(font, _bag_rect(i), i, i == selected_slot and i < Inventory.HOTBAR_SIZE)
-		if i == _held_slot:
+		if i == _held_slot and not _held_box:
 			draw_rect(_bag_rect(i).grow(3), Color(0.4, 0.9, 1.0), false, 3.0)
 	var hb := _bag_rect(0)
 	draw_string(font, Vector2(hb.position.x, hb.position.y - 6), "アイテム欄", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.6))
 	var info := "枠をタップ → 移動先の枠をタップで入れ替え"
 	if _held_slot != -1:
-		var id := inventory.id_at(_held_slot)
-		info = "%s × %d を選択中。移動先をタップ" % [ItemDB.item_name(id), inventory.slots[_held_slot]["count"]]
+		var src := _storage() if _held_box else inventory
+		info = "%s × %d を選択中。移動先をタップ" % [ItemDB.item_name(src.id_at(_held_slot)), src.slots[_held_slot]["count"]]
 	draw_string(font, Vector2(p.position.x + 24, p.end.y - 18), info, HORIZONTAL_ALIGNMENT_LEFT, p.size.x - 48, 15, Color(1, 1, 1, 0.75))
 
 
@@ -601,7 +638,7 @@ func _draw_craft(font: Font) -> void:
 	for i in tabs.size():
 		var tr := _tab_rect(i)
 		draw_rect(tr, Color(0.3, 0.55, 0.85, 0.9) if i == _tab else Color(1, 1, 1, 0.08))
-		draw_string(font, Vector2(tr.position.x, tr.position.y + 23), tabs[i], HORIZONTAL_ALIGNMENT_CENTER, tr.size.x, 15, Color.WHITE)
+		draw_string(font, Vector2(tr.position.x, tr.position.y + 22), tabs[i], HORIZONTAL_ALIGNMENT_CENTER, tr.size.x, 13 if tabs.size() > 7 else 15, Color.WHITE)
 
 	# 製炉の作業状況
 	if station_node and station_node.is_timed():
@@ -696,12 +733,14 @@ func _draw_settings(font: Font) -> void:
 		draw_string(font, Vector2(r.position.x, r.position.y + 38), b["label"], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, Color.WHITE)
 
 
-func _draw_slot(font: Font, rect: Rect2, i: int, selected: bool) -> void:
+func _draw_slot(font: Font, rect: Rect2, i: int, selected: bool, inv: Inventory = null) -> void:
+	if inv == null:
+		inv = inventory
 	draw_rect(rect, Color(0.08, 0.1, 0.12, 0.65))
 	draw_rect(rect, Color(1.0, 0.85, 0.3) if selected else Color(1, 1, 1, 0.35), false, 3.0 if selected else 1.5)
-	if i < Inventory.HOTBAR_SIZE:
+	if i < Inventory.HOTBAR_SIZE and inv == inventory:
 		draw_string(font, rect.position + Vector2(5, 15), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.55))
-	var s: Dictionary = inventory.slots[i]
+	var s: Dictionary = inv.slots[i]
 	if s.is_empty():
 		return
 	_draw_item_icon(rect, s["id"])
@@ -737,7 +776,7 @@ func _draw_item_icon(rect: Rect2, id: String) -> void:
 			draw_arc(c + Vector2(18, 0) * s, 5 * s, 0, TAU, 16, col, 1.5)
 		"rock", "ore":
 			var pts: PackedVector2Array = P.call([Vector2(-17, 8), Vector2(-12, -10), Vector2(3, -16), Vector2(17, -6), Vector2(15, 11), Vector2(-4, 15)])
-			draw_colored_polygon(pts, Color(0.6, 0.6, 0.58) if ItemDB.icon(id) == "rock" else Color(0.42, 0.4, 0.4))
+			draw_colored_polygon(pts, col if ItemDB.icon(id) == "rock" else Color(0.42, 0.4, 0.4))
 			if ItemDB.icon(id) == "ore":
 				for q in [Vector2(-6, -4), Vector2(6, 4), Vector2(5, -8), Vector2(-8, 7)]:
 					draw_circle(c + q * s, 3.5 * s, col)
@@ -923,5 +962,100 @@ func _draw_item_icon(rect: Rect2, id: String) -> void:
 			draw_rect(Rect2(c + Vector2(-18, -10) * s, Vector2(36, 26) * s), col)
 			draw_rect(Rect2(c + Vector2(-18, -10) * s, Vector2(36, 8) * s), col.darkened(0.2))
 			draw_rect(Rect2(c + Vector2(-3, -4) * s, Vector2(6, 8) * s), Color(0.3, 0.3, 0.32))
+		"pile":
+			draw_colored_polygon(P.call([Vector2(-20, 14), Vector2(-8, -6), Vector2(2, -12), Vector2(12, -4), Vector2(20, 14)]), col)
+			for q in [Vector2(-6, 6), Vector2(4, 2), Vector2(10, 9)]:
+				draw_circle(c + q * s, 1.5 * s, col.darkened(0.3))
+		"fiber":
+			for i in 5:
+				draw_line(c + Vector2(-12 + i * 6, 18) * s, c + Vector2(-6 + i * 3, -18) * s, col, 2.5)
+		"pearl":
+			draw_circle(c, 13 * s, col)
+			draw_circle(c + Vector2(-4, -4) * s, 4 * s, Color.WHITE)
+		"drop":
+			draw_colored_polygon(P.call([Vector2(0, -20), Vector2(10, 2), Vector2(0, 16), Vector2(-10, 2)]), col)
+			draw_circle(c + Vector2(0, 4) * s, 10 * s, col)
+			draw_circle(c + Vector2(-3, 0) * s, 3 * s, Color(1, 1, 1, 0.6))
+		"bucket":
+			draw_colored_polygon(P.call([Vector2(-16, -10), Vector2(16, -10), Vector2(11, 18), Vector2(-11, 18)]), Color(0.72, 0.74, 0.78))
+			draw_arc(c + Vector2(0, -10) * s, 16 * s, PI, TAU, 14, Color(0.72, 0.74, 0.78), 2.5)
+			if id != "bucket":
+				draw_rect(Rect2(c + Vector2(-14, -10) * s, Vector2(28, 7) * s), col)
+		"mask":
+			draw_rect(Rect2(c + Vector2(-18, -10) * s, Vector2(36, 20) * s), Color(0.2, 0.22, 0.26))
+			draw_rect(Rect2(c + Vector2(-14, -6) * s, Vector2(28, 12) * s), Color(0.55, 0.85, 1.0))
+			draw_line(c + Vector2(14, -8) * s, c + Vector2(18, -22) * s, col, 4.0)
+		"flippers":
+			for x in [-9, 9]:
+				draw_colored_polygon(P.call([Vector2(x - 5, -16), Vector2(x + 5, -16), Vector2(x + 9, 18), Vector2(x - 9, 18)]), col)
+		"coat":
+			draw_colored_polygon(P.call([Vector2(-12, -16), Vector2(12, -16), Vector2(20, -6), Vector2(14, -2), Vector2(14, 18), Vector2(-14, 18), Vector2(-14, -2), Vector2(-20, -6)]), col)
+			draw_line(c + Vector2(0, -14) * s, c + Vector2(0, 18) * s, col.darkened(0.35), 2.0)
+		"dynamite":
+			for i in 3:
+				draw_rect(Rect2(c + Vector2(-13 + i * 9, -14) * s, Vector2(8, 30) * s), col)
+			draw_line(c + Vector2(0, -14) * s, c + Vector2(6, -22) * s, Color(0.9, 0.85, 0.7), 2.0)
+		"cloth":
+			draw_rect(Rect2(c + Vector2(-18, -12) * s, Vector2(36, 24) * s), col)
+			draw_line(c + Vector2(-18, 4) * s, c + Vector2(18, 4) * s, col.darkened(0.2), 2.0)
+		"lamp":
+			draw_line(c + Vector2(0, 18) * s, c + Vector2(0, -6) * s, Color(0.3, 0.3, 0.32), 3.0)
+			draw_circle(c + Vector2(0, -10) * s, 9 * s, col)
+		"pot":
+			draw_colored_polygon(P.call([Vector2(-12, 0), Vector2(12, 0), Vector2(8, 18), Vector2(-8, 18)]), col)
+			for q in [Vector2(-6, -10), Vector2(0, -14), Vector2(6, -10)]:
+				draw_circle(c + q * s, 4 * s, Color(1.0, 0.55, 0.7))
+		"rug":
+			draw_rect(Rect2(c + Vector2(-20, -12) * s, Vector2(40, 24) * s), col)
+			draw_rect(Rect2(c + Vector2(-14, -7) * s, Vector2(28, 14) * s), Color(0.85, 0.65, 0.3), false, 2.0)
+		"heater":
+			draw_rect(Rect2(c + Vector2(-14, -16) * s, Vector2(28, 32) * s), Color(0.55, 0.58, 0.63))
+			for i in 4:
+				draw_rect(Rect2(c + Vector2(-10, -10 + i * 7) * s, Vector2(20, 3) * s), col)
+		"telescope":
+			draw_line(c + Vector2(-16, 10) * s, c + Vector2(16, -14) * s, col, 6.0)
+			draw_line(c + Vector2(0, 0) * s, c + Vector2(-8, 18) * s, Color(0.3, 0.3, 0.32), 2.0)
+			draw_line(c + Vector2(0, 0) * s, c + Vector2(8, 18) * s, Color(0.3, 0.3, 0.32), 2.0)
 		_:
 			draw_rect(Rect2(c + Vector2(-16, -16) * s, Vector2(32, 32) * s), col)
+
+
+func _draw_storage(font: Font) -> void:
+	var c := _craft_panel()
+	draw_rect(c, C_PANEL)
+	draw_rect(c, C_LINE, false, 2.0)
+	draw_string(font, c.position + Vector2(20, 38), ItemDB.station_name(station), HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color.WHITE)
+	var box := _storage()
+	for i in box.slots.size():
+		_draw_slot(font, _box_rect(i), i, false, box)
+		if i == _held_slot and _held_box:
+			draw_rect(_box_rect(i).grow(3), Color(0.4, 0.9, 1.0), false, 3.0)
+	draw_string(font, Vector2(c.position.x + 20, c.end.y - 18), "持ち物の枠と入れ替えて出し入れできる", HORIZONTAL_ALIGNMENT_LEFT, c.size.x - 40, 14, Color(1, 1, 1, 0.7))
+
+
+## 左上の息と体温のメーター
+func _draw_meters(font: Font) -> void:
+	var y := 112.0
+	if oxygen >= 0.0:
+		draw_string(font, Vector2(24, y), "息", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+		for i in 10:
+			var filled := oxygen * 10.0 > i + 0.01
+			var c := Vector2(62 + i * 20, y - 6)
+			draw_circle(c, 7, Color(0.55, 0.85, 1.0, 0.95) if filled else Color(1, 1, 1, 0.15))
+			if filled:
+				draw_circle(c + Vector2(-2, -2), 2, Color(1, 1, 1, 0.9))
+		y += 30.0
+	if temperature >= 0.0:
+		draw_string(font, Vector2(24, y), "体温", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+		var bar := Rect2(Vector2(72, y - 13), Vector2(180, 12))
+		# 青(寒い)→ 緑(ふつう)→ 赤(暑い)
+		var steps := 30
+		for k in steps:
+			var t := float(k) / steps
+			var col := Color(0.3, 0.6, 1.0).lerp(Color(0.4, 0.85, 0.4), clampf(t * 2.0, 0.0, 1.0)).lerp(Color(1.0, 0.35, 0.2), clampf(t * 2.0 - 1.0, 0.0, 1.0))
+			draw_rect(Rect2(bar.position + Vector2(bar.size.x * t, 0), Vector2(bar.size.x / steps + 1, bar.size.y)), Color(col, 0.85))
+		var mx := bar.position.x + bar.size.x * clampf(temperature / 100.0, 0.0, 1.0)
+		draw_rect(Rect2(Vector2(mx - 3, bar.position.y - 4), Vector2(6, bar.size.y + 8)), Color.WHITE)
+		var state := "寒い" if temperature < 25.0 else ("暑い" if temperature > 75.0 else "")
+		if state != "":
+			draw_string(font, Vector2(bar.end.x + 10, y), state, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.8, 0.5))

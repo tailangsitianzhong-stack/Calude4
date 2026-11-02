@@ -1,6 +1,6 @@
 shader_type spatial;
 // 湖の水面。深さの画像で色と透明度を変え、岸には白い泡、表面には流れる小さな波。
-render_mode blend_mix, depth_draw_opaque, cull_back, specular_schlick_ggx;
+render_mode blend_mix, depth_draw_opaque, cull_disabled, specular_schlick_ggx;
 
 uniform sampler2D depth_tex : filter_linear, repeat_disable;
 uniform sampler2D wave_normal : hint_normal, filter_linear_mipmap, repeat_enable;

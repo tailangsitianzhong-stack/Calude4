@@ -16,6 +16,7 @@ var occupied := {}           ## key -> 置いた物
 var _scenes := {}
 var _preview: Node3D
 var _preview_id := ""
+var _preview_ok := true
 var _ok_mat: StandardMaterial3D
 var _ng_mat: StandardMaterial3D
 var _mats := {}
@@ -32,6 +33,16 @@ func _ready() -> void:
 	_mats["iron_dark"] = _mat(Color(0.35, 0.38, 0.43), 0.5, 0.7)
 	_mats["roof"] = _mat(Color(0.5, 0.3, 0.18), 0.9)
 	_mats["roof_dark"] = _mat(Color(0.36, 0.21, 0.12), 0.9)
+	_mats["brick"] = _mat(Color(0.66, 0.34, 0.25), 0.9)
+	_mats["brick_dark"] = _mat(Color(0.48, 0.24, 0.18), 0.9)
+	_mats["sandstone"] = _mat(Color(0.8, 0.66, 0.44), 0.95)
+	_mats["sandstone_dark"] = _mat(Color(0.62, 0.5, 0.32), 0.95)
+	_mats["tile"] = _mat(Color(0.62, 0.27, 0.2), 0.8)
+	_mats["tile_dark"] = _mat(Color(0.45, 0.19, 0.14), 0.8)
+	var ice := _mat(Color(0.72, 0.88, 1.0, 0.82), 0.1)
+	ice.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_mats["ice"] = ice
+	_mats["ice_dark"] = _mat(Color(0.6, 0.78, 0.92), 0.2)
 	var glass := _mat(Color(0.65, 0.88, 1.0, 0.35), 0.05)
 	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mats["glass"] = glass
@@ -54,6 +65,30 @@ static func _ghost(c: Color) -> StandardMaterial3D:
 	return m
 
 
+## 起動時(タイトル画面の裏)に、置ける物をすべて1回ずつ描いておく。
+## 初めて置いたときにシェーダーの準備で固まるのを防ぐ。戻り値は数フレーム後に消すノード
+func warm_up(at: Transform3D) -> Node3D:
+	var holder := Node3D.new()
+	add_child(holder)
+	holder.global_transform = at
+	var i := 0
+	for id in ItemDB.data()["items"]:
+		if ItemDB.place_kind(id) == "":
+			continue
+		var v := make_visual(id, null)
+		holder.add_child(v)
+		v.position = Vector3((i % 6) * 0.6 - 1.5, (i / 6) * 0.4 - 0.6, 0) 
+		v.scale = Vector3.ONE * 0.1
+		var ghost := make_visual(id, null)
+		holder.add_child(ghost)
+		ghost.position = v.position + Vector3(0.3, 0, 0)
+		ghost.scale = Vector3.ONE * 0.1
+		for g in ghost.find_children("*", "GeometryInstance3D", true, false):
+			(g as GeometryInstance3D).material_override = _ok_mat if i % 2 == 0 else _ng_mat
+		i += 1
+	return holder
+
+
 func scene(model: String) -> PackedScene:
 	if not _scenes.has(model):
 		_scenes[model] = load("res://assets/models/%s.glb" % model)
@@ -74,6 +109,9 @@ func update_preview(id: String) -> Dictionary:
 			_preview.queue_free()
 		_preview = make_visual(id, null)
 		_preview_id = id
+		_preview_ok = true
+		for g in _preview.find_children("*", "GeometryInstance3D", true, false):
+			(g as GeometryInstance3D).material_override = _ok_mat
 		add_child(_preview)
 		for g in _preview.find_children("*", "GeometryInstance3D", true, false):
 			(g as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -88,8 +126,10 @@ func update_preview(id: String) -> Dictionary:
 		_preview.global_transform = plan["xform"]
 		if plan.has("scale_y"):
 			_preview.scale.y = plan["scale_y"]
-	for g in _preview.find_children("*", "GeometryInstance3D", true, false):
-		(g as GeometryInstance3D).material_override = _ok_mat if plan["ok"] else _ng_mat
+	if plan["ok"] != _preview_ok:
+		_preview_ok = plan["ok"]
+		for g in _preview.find_children("*", "GeometryInstance3D", true, false):
+			(g as GeometryInstance3D).material_override = _ok_mat if _preview_ok else _ng_mat
 	return plan
 
 
@@ -342,6 +382,29 @@ func pick_up(body: Node) -> void:
 
 # ---------------------------------------------------------------- 見た目と当たり判定
 
+## 建築パーツの箱を材質ごとに1つのメッシュへまとめる(描画の負荷を減らす)
+class PieceBuilder:
+	var tools := {}
+
+	func box(size: Vector3, xf: Transform3D, m: Material) -> void:
+		if not tools.has(m):
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			tools[m] = st
+		var bm := BoxMesh.new()
+		bm.size = size
+		(tools[m] as SurfaceTool).append_from(bm, 0, xf)
+
+	func commit() -> MeshInstance3D:
+		var mesh := ArrayMesh.new()
+		for m in tools:
+			(tools[m] as SurfaceTool).commit(mesh)
+			mesh.surface_set_material(mesh.get_surface_count() - 1, m)
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		return mi
+
+
 ## 見た目(と、body があれば当たり判定)を作る
 func make_visual(id: String, body: Node, depth := 1.0) -> Node3D:
 	var kind := ItemDB.place_kind(id)
@@ -349,108 +412,111 @@ func make_visual(id: String, body: Node, depth := 1.0) -> Node3D:
 	var mat_name: String = ItemDB.item(id).get("mat", "wood")
 	var m: StandardMaterial3D = _mats.get(mat_name, _mats["wood"])
 	var md: StandardMaterial3D = _mats.get(mat_name + "_dark", m)
+	var pb := PieceBuilder.new()
 	match kind:
 		"foundation":
-			_box(root, body, Vector3(CELL, depth, CELL), Vector3(0, -depth / 2.0, 0), m)
-			_box(root, null, Vector3(CELL + 0.04, 0.08, CELL + 0.04), Vector3(0, -0.04, 0), md)
+			_box(pb, body, Vector3(CELL, depth, CELL), Vector3(0, -depth / 2.0, 0), m)
+			# 縁取りは上面より少し下げて、上面と重ならないようにする(重なるとちらつく)
+			_box(pb, null, Vector3(CELL + 0.04, 0.08, CELL + 0.04), Vector3(0, -0.07, 0), md)
 		"wall":
-			_make_wall(root, body, id, m, md)
+			_make_wall(pb, body, id, m, md)
 		"fence":
 			for x in [-0.95, 0.0, 0.95]:
-				_box(root, body, Vector3(0.12, 1.1, 0.12), Vector3(x, 0.55, 0), md)
+				_box(pb, null, Vector3(0.12, 1.1, 0.12), Vector3(x, 0.55, 0), md)
 			for y in [0.4, 0.85]:
-				_box(root, null, Vector3(CELL, 0.08, 0.06), Vector3(0, y, 0), m)
-			if body:
-				_box(null, body, Vector3(CELL, 1.1, 0.12), Vector3(0, 0.55, 0), null)
+				_box(pb, null, Vector3(CELL - 0.14, 0.08, 0.06), Vector3(0, y, 0), m)
+			_box(null, body, Vector3(CELL, 1.1, 0.12), Vector3(0, 0.55, 0), null)
 		"floor":
-			if mat_name == "roof" or id == "iron_roof":
-				_box(root, body, Vector3(CELL + 0.3, 0.12, CELL + 0.3), Vector3(0, 0.06, 0), m)
+			if mat_name in ["roof", "tile"] or id == "iron_roof":
+				_box(pb, body, Vector3(CELL + 0.3, 0.12, CELL + 0.3), Vector3(0, 0.06, 0), m)
 				for i in 5:
-					_box(root, null, Vector3(CELL + 0.3, 0.05, 0.08), Vector3(0, 0.14, -0.9 + i * 0.45), md)
+					_box(pb, null, Vector3(CELL + 0.3, 0.05, 0.08), Vector3(0, 0.15, -0.9 + i * 0.45), md)
 			else:
-				_box(root, body, Vector3(CELL, 0.1, CELL), Vector3(0, 0.05, 0), m)
+				_box(pb, body, Vector3(CELL, 0.1, CELL), Vector3(0, 0.05, 0), m)
 				for i in 4:
-					_box(root, null, Vector3(0.02, 0.105, CELL), Vector3(-0.75 + i * 0.5, 0.05, 0), md)
+					_box(pb, null, Vector3(0.03, 0.12, CELL - 0.02), Vector3(-0.75 + i * 0.5, 0.05, 0), md)
 		"stairs":
 			for i in 6:
 				var h := (i + 1) * WALL_H / 6.0
-				_box(root, null, Vector3(1.6, 0.12, CELL / 6.0), Vector3(0, h - 0.06, CELL / 2.0 - (i + 0.5) * CELL / 6.0), m)
-				_box(root, null, Vector3(1.6, h - 0.12, 0.05), Vector3(0, (h - 0.12) / 2.0, CELL / 2.0 - (i + 0.5) * CELL / 6.0 + CELL / 12.0), md)
+				var z := CELL / 2.0 - (i + 0.5) * CELL / 6.0
+				_box(pb, null, Vector3(1.6, 0.12, CELL / 6.0), Vector3(0, h - 0.06, z), m)
+				_box(pb, null, Vector3(1.56, h - 0.13, 0.05), Vector3(0, (h - 0.13) / 2.0, z + CELL / 12.0 - 0.03), md)
 			if body:
 				# 斜めの当たり判定で登れるようにする
 				var ramp := CollisionShape3D.new()
 				var shape := BoxShape3D.new()
-				var length := Vector2(CELL, WALL_H).length()
-				shape.size = Vector3(1.6, 0.1, length)
+				shape.size = Vector3(1.6, 0.1, Vector2(CELL, WALL_H).length())
 				ramp.shape = shape
 				ramp.position = Vector3(0, WALL_H / 2.0, 0)
 				ramp.rotation.x = atan2(WALL_H, CELL)
 				body.add_child(ramp)
 		_:
 			var model: String = ItemDB.item(id).get("model", "")
-			var inst: Node3D = scene(model).instantiate()
-			root.add_child(inst)
+			root.add_child(scene(model).instantiate())
 			if body:
 				_add_model_collision(body, id)
-			if id in ["torch", "lantern"] and body:
-				var light := OmniLight3D.new()
-				light.light_color = Color(1.0, 0.75, 0.4)
-				light.light_energy = 1.4 if id == "torch" else 1.8
-				light.omni_range = 7.0 if id == "torch" else 9.0
-				light.position.y = 1.4 if id == "torch" else 1.62
-				root.add_child(light)
+				var light_h: float = ItemDB.item(id).get("light", 0.0)
+				if light_h > 0.0:
+					var light := OmniLight3D.new()
+					light.light_color = Color(1.0, 0.75, 0.4)
+					light.light_energy = 1.6
+					light.omni_range = 8.0
+					light.position.y = light_h
+					light.add_to_group("night_light")
+					root.add_child(light)
+	if not pb.tools.is_empty():
+		root.add_child(pb.commit())
 	return root
 
 
-func _make_wall(root: Node3D, body: Node, id: String, m: Material, md: Material) -> void:
+func _make_wall(pb: PieceBuilder, body: Node, id: String, m: Material, md: Material) -> void:
 	var variant: String = ItemDB.item(id).get("variant", "")
 	var w := CELL
 	var h := WALL_H
 	var t := WALL_T
+	var side := (w - 1.0) / 2.0
 	if variant == "door":
 		# 幅 1m・高さ 2.1m の入口。扉は開いた状態
-		var side := (w - 1.0) / 2.0
-		_box(root, body, Vector3(side, h, t), Vector3(-0.5 - side / 2.0, h / 2.0, 0), m)
-		_box(root, body, Vector3(side, h, t), Vector3(0.5 + side / 2.0, h / 2.0, 0), m)
-		_box(root, body, Vector3(1.0, h - 2.1, t), Vector3(0, 2.1 + (h - 2.1) / 2.0, 0), m)
-		var leaf := _box(root, null, Vector3(0.95, 2.05, 0.06), Vector3(0.475, 1.03, 0), md)
-		leaf.get_parent().remove_child(leaf)
-		var hinge := Node3D.new()
-		hinge.position = Vector3(-0.5, 0, t / 2.0)
-		hinge.rotation.y = deg_to_rad(-100)
-		root.add_child(hinge)
-		hinge.add_child(leaf)
-		_box(root, null, Vector3(0.08, 0.08, 0.1), Vector3(0.3, 1.0, 0.0), _mats["iron"]).reparent(leaf)
+		_box(pb, body, Vector3(side, h, t), Vector3(-0.5 - side / 2.0, h / 2.0, 0), m)
+		_box(pb, body, Vector3(side, h, t), Vector3(0.5 + side / 2.0, h / 2.0, 0), m)
+		_box(pb, body, Vector3(1.0, h - 2.1, t), Vector3(0, 2.1 + (h - 2.1) / 2.0, 0), m)
+		var hinge := Transform3D(Basis(Vector3.UP, deg_to_rad(-100)), Vector3(-0.5, 0, t / 2.0 + 0.04))
+		pb.box(Vector3(0.95, 2.05, 0.06), hinge * Transform3D(Basis(), Vector3(0.475, 1.03, 0)), md)
+		pb.box(Vector3(0.08, 0.08, 0.1), hinge * Transform3D(Basis(), Vector3(0.78, 1.0, 0.03)), _mats["iron"])
 	elif variant == "window":
-		var side := (w - 1.0) / 2.0
-		_box(root, body, Vector3(side, h, t), Vector3(-0.5 - side / 2.0, h / 2.0, 0), m)
-		_box(root, body, Vector3(side, h, t), Vector3(0.5 + side / 2.0, h / 2.0, 0), m)
-		_box(root, body, Vector3(1.0, 0.9, t), Vector3(0, 0.45, 0), m)
-		_box(root, body, Vector3(1.0, h - 1.8, t), Vector3(0, 1.8 + (h - 1.8) / 2.0, 0), m)
-		_box(root, body, Vector3(1.0, 0.9, 0.04), Vector3(0, 1.35, 0), _mats["glass"])
-		_box(root, null, Vector3(0.06, 0.9, 0.08), Vector3(0, 1.35, 0), md)
-		_box(root, null, Vector3(1.0, 0.06, 0.08), Vector3(0, 1.35, 0), md)
+		_box(pb, body, Vector3(side, h, t), Vector3(-0.5 - side / 2.0, h / 2.0, 0), m)
+		_box(pb, body, Vector3(side, h, t), Vector3(0.5 + side / 2.0, h / 2.0, 0), m)
+		_box(pb, body, Vector3(1.0, 0.9, t), Vector3(0, 0.45, 0), m)
+		_box(pb, body, Vector3(1.0, h - 1.8, t), Vector3(0, 1.8 + (h - 1.8) / 2.0, 0), m)
+		_box(pb, body, Vector3(1.0, 0.9, 0.04), Vector3(0, 1.35, 0), _mats["glass"])
+		_box(pb, null, Vector3(0.06, 0.9, 0.08), Vector3(0, 1.35, 0), md)
+		_box(pb, null, Vector3(1.0, 0.06, 0.08), Vector3(0, 1.35, 0), md)
+	elif variant == "glass":
+		_box(pb, body, Vector3(w - 0.2, h - 0.2, 0.05), Vector3(0, h / 2.0, 0), _mats["glass"])
+		for x in [-0.33, 0.33]:
+			_box(pb, null, Vector3(0.05, h - 0.2, 0.08), Vector3(x, h / 2.0, 0), md)
+		_box(pb, null, Vector3(w, 0.1, t), Vector3(0, 0.05, 0), md)
 	else:
-		_box(root, body, Vector3(w, h, t), Vector3(0, h / 2.0, 0), m)
-	# 縁取り(柱と梁)
-	_box(root, null, Vector3(0.14, h, t + 0.04), Vector3(-w / 2.0 + 0.07, h / 2.0, 0), md)
-	_box(root, null, Vector3(0.14, h, t + 0.04), Vector3(w / 2.0 - 0.07, h / 2.0, 0), md)
-	_box(root, null, Vector3(w, 0.12, t + 0.04), Vector3(0, h - 0.06, 0), md)
-	if ItemDB.item(id).get("mat", "") == "wood" and variant == "":
+		_box(pb, body, Vector3(w, h, t), Vector3(0, h / 2.0, 0), m)
+	# 縁取り(柱と梁)。柱は梁より少し厚く・低くして、面が重ならないようにする
+	_box(pb, null, Vector3(0.14, h - 0.02, t + 0.06), Vector3(-w / 2.0 + 0.07, (h - 0.02) / 2.0, 0), md)
+	_box(pb, null, Vector3(0.14, h - 0.02, t + 0.06), Vector3(w / 2.0 - 0.07, (h - 0.02) / 2.0, 0), md)
+	_box(pb, null, Vector3(w - 0.3, 0.12, t + 0.04), Vector3(0, h - 0.05, 0), md)
+	if variant == "" and mat_name_of(id) in ["wood"]:
 		for i in 4:
-			_box(root, null, Vector3(w - 0.28, 0.03, t + 0.02), Vector3(0, 0.55 + i * 0.5, 0), md)
+			_box(pb, null, Vector3(w - 0.3, 0.03, t + 0.02), Vector3(0, 0.55 + i * 0.5, 0), md)
+	elif variant == "" and mat_name_of(id) in ["brick", "stone", "sandstone"]:
+		for i in 5:
+			_box(pb, null, Vector3(w - 0.3, 0.025, t + 0.015), Vector3(0, 0.42 + i * 0.42, 0), md)
 
 
-func _box(root: Node3D, body: Node, size: Vector3, pos: Vector3, m: Material) -> MeshInstance3D:
-	var mi: MeshInstance3D = null
-	if root:
-		mi = MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = size
-		mi.mesh = bm
-		mi.material_override = m
-		mi.position = pos
-		root.add_child(mi)
+func mat_name_of(id: String) -> String:
+	return ItemDB.item(id).get("mat", "")
+
+
+func _box(pb: PieceBuilder, body: Node, size: Vector3, pos: Vector3, m: Material) -> void:
+	if pb and m:
+		pb.box(size, Transform3D(Basis(), pos), m)
 	if body:
 		var col := CollisionShape3D.new()
 		var shape := BoxShape3D.new()
@@ -458,7 +524,6 @@ func _box(root: Node3D, body: Node, size: Vector3, pos: Vector3, m: Material) ->
 		col.shape = shape
 		col.position = pos
 		body.add_child(col)
-	return mi
 
 
 func _add_model_collision(body: Node, id: String) -> void:
@@ -475,6 +540,14 @@ func _add_model_collision(body: Node, id: String) -> void:
 		"chest": [Vector3(0.94, 0.66, 0.6), 0.33],
 		"torch": [Vector3(0.15, 1.4, 0.15), 0.7],
 		"lantern": [Vector3(0.3, 1.8, 0.3), 0.9],
+		"street_lamp": [Vector3(0.4, 3.2, 0.4), 1.6],
+		"fireplace": [Vector3(1.6, 1.3, 0.85), 0.65],
+		"big_chest": [Vector3(1.44, 0.9, 0.74), 0.45],
+		"flower_pot": [Vector3(0.45, 0.8, 0.45), 0.4],
+		"rug": [Vector3(1.8, 0.04, 1.2), 0.02],
+		"geo_heater": [Vector3(0.9, 1.5, 0.5), 0.75],
+		"lava_lamp": [Vector3(0.4, 0.95, 0.4), 0.47],
+		"telescope": [Vector3(1.0, 1.6, 1.2), 0.8],
 	}
 	var s: Array = sizes.get(id, [Vector3(1, 1, 1), 0.5])
 	var size: Vector3 = s[0]

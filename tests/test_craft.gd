@@ -21,7 +21,7 @@ func _recipe(station: String, id: String) -> Dictionary:
 
 
 func _init() -> void:
-	check(ItemDB.recipes_for("workbench").size() == 50, "作業台で作れる物は 50 種類 (%d)" % ItemDB.recipes_for("workbench").size())
+	check(ItemDB.recipes_for("workbench").size() == 78, "作業台で作れる物は 78 種類(元の50 + 追加28) (%d)" % ItemDB.recipes_for("workbench").size())
 	check(ItemDB.item_name("axe") == "石の斧" and ItemDB.item_name("pickaxe") == "石のツルハシ", "最初の道具は石の斧・石のツルハシ")
 	check(_recipe("workbench", "furnace")["cost"].keys() == ["stone"], "製炉は石だけで作れる")
 

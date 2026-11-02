@@ -825,10 +825,283 @@ def make_furniture():
     export(os.path.join(OUT, "chest.glb"), [join(parts, "Chest")])
 
 
+def _rock(m, seed, scale, sub=2, amount=0.09, z=0.3):
+    o = prim("ico", (0, 0, z), scale, m=m, smooth=False, sub=sub)
+    return jitter(o, amount, seed=seed)
+
+
+def _chunks(parts, m, seed, n, spread=(0.62, 0.55, 0.45), size=(0.14, 0.24), center=(0, 0, 0.3)):
+    r = random.Random(seed)
+    for i in range(n):
+        d = Vector((r.uniform(-1, 1), r.uniform(-1, 1), r.uniform(-0.2, 1))).normalized()
+        c = Vector(center) + Vector((d.x * spread[0], d.y * spread[1], d.z * spread[2]))
+        s = r.uniform(*size)
+        parts.append(jitter(prim("ico", c, (s, s, s), m=m, smooth=False, sub=1), 0.02, seed=i + seed))
+
+
+def make_biome_nature():
+    """森林・砂漠・雪山・溶岩地帯・湖の底の資源"""
+    rnd = random.Random(31)
+
+    # 大木(森林)
+    reset()
+    bark = mat("BarkDark", (0.33, 0.22, 0.14), rough=0.9)
+    leaf_a = mat("LeafDeep", (0.16, 0.38, 0.16), rough=0.8)
+    leaf_b = mat("LeafMoss", (0.24, 0.45, 0.18), rough=0.8)
+    parts = [limb((0, 0, 0), (0, 0, 6.5), 0.55, bark, seg=12, r_end=0.3)]
+    for a in range(5):  # 根
+        ang = a / 5 * math.tau
+        parts.append(limb((0, 0, 0.6), (math.cos(ang) * 1.1, math.sin(ang) * 1.1, -0.1), 0.2, bark, seg=8, r_end=0.08))
+    for a in range(4):  # 枝
+        ang = a / 4 * math.tau + 0.4
+        parts.append(limb((0, 0, 4.0 + a * 0.5), (math.cos(ang) * 2.2, math.sin(ang) * 2.2, 6.0 + a * 0.4), 0.16, bark, seg=8, r_end=0.07))
+    for i in range(9):
+        ang = i / 9 * math.tau
+        r = 2.2 if i else 0.0
+        s = rnd.uniform(2.6, 3.4)
+        o = prim("ico", (math.cos(ang) * r, math.sin(ang) * r, 7.2 + rnd.uniform(-0.6, 0.8) + (1.2 if i == 0 else 0)), (s, s, s * 0.8),
+                 m=leaf_a if i % 2 else leaf_b, smooth=False, sub=2)
+        parts.append(jitter(o, 0.14, seed=60 + i))
+    export(os.path.join(OUT, "tree_big.glb"), [join(parts, "TreeBig")])
+
+    # 雪をかぶった針葉樹(雪山)
+    reset()
+    bark = mat("Bark", (0.38, 0.26, 0.17), rough=0.9)
+    needle = mat("NeedleDark", (0.12, 0.3, 0.22), rough=0.85)
+    snow = mat("Snow", (0.95, 0.96, 0.98), rough=0.9)
+    parts = [limb((0, 0, 0), (0, 0, 5.5), 0.2, bark, seg=8, r_end=0.06)]
+    for i, (z, r) in enumerate(((1.6, 1.6), (2.6, 1.3), (3.5, 1.0), (4.4, 0.7), (5.2, 0.42))):
+        parts.append(jitter(prim("cone", (0, 0, z + 0.6), (r * 2, r * 2, 1.6), m=needle, smooth=False, seg=9), 0.05, seed=70 + i))
+        parts.append(jitter(prim("cone", (0, 0, z + 0.95), (r * 1.4, r * 1.4, 0.9), m=snow, smooth=False, seg=9), 0.04, seed=80 + i))
+    export(os.path.join(OUT, "tree_pine_snow.glb"), [join(parts, "TreePineSnow")])
+
+    # 枯れ木(溶岩地帯・砂漠)
+    reset()
+    dead = mat("DeadWood", (0.3, 0.26, 0.22), rough=1.0)
+    parts = [limb((0, 0, 0), (0.2, 0, 3.4), 0.2, dead, seg=7, r_end=0.07)]
+    for i in range(5):
+        ang = i / 5 * math.tau
+        z = 1.6 + i * 0.35
+        parts.append(limb((0.1, 0, z), (math.cos(ang) * 1.2, math.sin(ang) * 1.2, z + 0.9), 0.07, dead, seg=6, r_end=0.02))
+    export(os.path.join(OUT, "tree_dead.glb"), [join(parts, "TreeDead")])
+
+    # サボテン(砂漠)
+    reset()
+    green = mat("Cactus", (0.32, 0.55, 0.3), rough=0.7)
+    flower = mat("CactusFlower", (1.0, 0.45, 0.6), rough=0.5)
+    parts = [limb((0, 0, 0), (0, 0, 2.6), 0.28, green, seg=10, r_end=0.26),
+             prim("sphere", (0, 0, 2.6), (0.52, 0.52, 0.4), m=green, seg=10, rings=6)]
+    for s, h in ((1, 1.1), (-1, 1.5)):
+        parts.append(limb((0, 0, h), (s * 0.6, 0, h), 0.17, green, seg=8))
+        parts.append(limb((s * 0.6, 0, h), (s * 0.6, 0, h + 0.8), 0.17, green, seg=8))
+        parts.append(prim("sphere", (s * 0.6, 0, h + 0.8), (0.34, 0.34, 0.25), m=green, seg=8, rings=5))
+    parts.append(prim("sphere", (0, 0, 2.86), (0.18, 0.18, 0.12), m=flower, seg=8, rings=5))
+    export(os.path.join(OUT, "cactus.glb"), [join(parts, "Cactus")])
+
+    # 砂岩(層になった岩)
+    reset()
+    sa = mat("Sandstone", (0.8, 0.64, 0.42), rough=0.95)
+    sb = mat("SandstoneDark", (0.68, 0.48, 0.32), rough=0.95)
+    parts = []
+    for i in range(4):
+        s = 1.4 - i * 0.22
+        parts.append(jitter(prim("cyl", (rnd.uniform(-0.1, 0.1), rnd.uniform(-0.1, 0.1), 0.12 + i * 0.22), (s, s * 0.85, 0.24),
+                                 m=sa if i % 2 else sb, smooth=False, seg=9), 0.04, seed=90 + i))
+    export(os.path.join(OUT, "sandstone.glb"), [join(parts, "Sandstone")])
+
+    # 砂山
+    reset()
+    sand = mat("Sand", (0.86, 0.72, 0.48), rough=1.0)
+    parts = [jitter(prim("sphere", (0, 0, 0), (1.8, 1.6, 0.9), m=sand, smooth=True, seg=14, rings=7), 0.04, seed=95)]
+    export(os.path.join(OUT, "sand_pile.glb"), [join(parts, "SandPile")])
+
+    # 金鉱脈・石炭
+    for name, base_c, ore_c, metal, seed in (("ore_gold", (0.5, 0.42, 0.34), (1.0, 0.8, 0.25), 1.0, 41),
+                                             ("ore_coal", (0.4, 0.38, 0.37), (0.08, 0.08, 0.09), 0.0, 42)):
+        reset()
+        base = mat("OreRock", base_c, rough=0.9)
+        om = mat("OreBit", ore_c, rough=0.3 if metal else 0.8, metal=metal)
+        parts = [_rock(base, seed, (1.4, 1.2, 1.0))]
+        _chunks(parts, om, seed, 11)
+        export(os.path.join(OUT, f"{name}.glb"), [join(parts, name)])
+
+    # 氷塊
+    reset()
+    ice = mat("Ice", (0.72, 0.88, 1.0), rough=0.05, metal=0.2)
+    ice2 = mat("IceDeep", (0.5, 0.72, 0.95), rough=0.1, metal=0.2)
+    parts = [jitter(prim("cube", (0, 0, 0.45), (1.1, 1.0, 0.95), (0, 0, 0.3), m=ice, smooth=False), 0.06, seed=50),
+             jitter(prim("cube", (0.55, 0.3, 0.3), (0.6, 0.6, 0.6), (0.2, 0.1, 0.8), m=ice2, smooth=False), 0.05, seed=51),
+             jitter(prim("cube", (-0.45, -0.35, 0.25), (0.5, 0.55, 0.5), (0.1, 0.3, 0.2), m=ice2, smooth=False), 0.05, seed=52)]
+    export(os.path.join(OUT, "ice.glb"), [join(parts, "Ice")])
+
+    # 硫黄
+    reset()
+    rock = mat("SulfurRock", (0.45, 0.42, 0.36), rough=0.95)
+    yellow = mat("Sulfur", (0.98, 0.86, 0.2), rough=0.6, emit=(0.6, 0.5, 0.05), emit_strength=0.4)
+    parts = [_rock(rock, 43, (1.2, 1.1, 0.6), z=0.15)]
+    for i in range(8):
+        a = i / 8 * math.tau
+        h = rnd.uniform(0.3, 0.6)
+        parts.append(prim("cone", (math.cos(a) * 0.35, math.sin(a) * 0.35, 0.4 + h / 2), (0.22, 0.22, h), m=yellow, smooth=False, seg=5))
+    _chunks(parts, yellow, 44, 6, spread=(0.5, 0.45, 0.25), size=(0.12, 0.2), center=(0, 0, 0.2))
+    export(os.path.join(OUT, "sulfur.glb"), [join(parts, "Sulfur")])
+
+    # 黒曜石(尖ったガラス質の岩)
+    reset()
+    obs = mat("Obsidian", (0.05, 0.04, 0.08), rough=0.08, metal=0.3)
+    glow = mat("ObsidianGlow", (0.5, 0.2, 0.7), rough=0.1, emit=(0.4, 0.15, 0.6), emit_strength=0.8)
+    parts = []
+    for i in range(6):
+        a = i / 6 * math.tau + rnd.uniform(-0.3, 0.3)
+        tilt = 0.3 if i else 0.0
+        h = rnd.uniform(0.8, 1.4) * (1.3 if i == 0 else 1.0)
+        bp = Vector((math.cos(a) * 0.3 * (i > 0), math.sin(a) * 0.3 * (i > 0), 0.0))
+        d = Vector((math.cos(a) * tilt, math.sin(a) * tilt, 1)).normalized()
+        sp = prim("cone", (0, 0, 0), (0.5, 0.5, h), m=obs, smooth=False, seg=5)
+        sp.location = bp + d * (h / 2)
+        sp.rotation_euler = Vector((0, 0, 1)).rotation_difference(d).to_euler()
+        activate(sp)
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+        parts.append(sp)
+    _chunks(parts, glow, 45, 4, spread=(0.35, 0.35, 0.2), size=(0.06, 0.1), center=(0, 0, 0.3))
+    export(os.path.join(OUT, "obsidian.glb"), [join(parts, "Obsidian")])
+
+    # 玄武岩(溶岩地帯の岩)
+    reset()
+    basalt = mat("Basalt", (0.16, 0.14, 0.14), rough=0.95)
+    ember = mat("Ember", (1.0, 0.4, 0.1), rough=0.5, emit=(1.0, 0.35, 0.05), emit_strength=2.5)
+    parts = [_rock(basalt, 46, (1.4, 1.2, 0.9))]
+    _chunks(parts, ember, 47, 5, size=(0.06, 0.1))
+    export(os.path.join(OUT, "basalt.glb"), [join(parts, "Basalt")])
+
+    # 二枚貝(湖の底、真珠が取れる)
+    reset()
+    shell = mat("Shell", (0.86, 0.8, 0.74), rough=0.5)
+    inner = mat("ShellInner", (0.95, 0.75, 0.8), rough=0.3)
+    pearl = mat("Pearl", (0.98, 0.97, 0.95), rough=0.1, metal=0.3)
+    parts = [prim("sphere", (0, 0, 0.08), (0.6, 0.5, 0.16), m=shell, seg=14, rings=6),
+             prim("sphere", (0, -0.1, 0.24), (0.6, 0.5, 0.14), (math.radians(-35), 0, 0), m=shell, seg=14, rings=6),
+             prim("sphere", (0, 0.02, 0.14), (0.5, 0.4, 0.06), m=inner, seg=12, rings=5),
+             prim("sphere", (0, 0.03, 0.2), (0.12, 0.12, 0.12), m=pearl, seg=10, rings=6)]
+    export(os.path.join(OUT, "clam.glb"), [join(parts, "Clam")])
+
+    # 粘土の塊
+    reset()
+    clay = mat("Clay", (0.62, 0.45, 0.36), rough=0.9)
+    parts = [jitter(prim("sphere", (0, 0, 0.15), (1.3, 1.1, 0.55), m=clay, smooth=True, seg=12, rings=6), 0.05, seed=48),
+             jitter(prim("sphere", (0.4, 0.2, 0.32), (0.6, 0.5, 0.4), m=clay, smooth=True, seg=10, rings=5), 0.03, seed=49)]
+    export(os.path.join(OUT, "clay.glb"), [join(parts, "Clay")])
+
+
+def make_new_items():
+    """追加の設置物と、手に持つバケツ・ダイナマイト"""
+    R = math.radians
+
+    reset()
+    iron = mat("Iron", (0.3, 0.3, 0.32), rough=0.4, metal=0.9)
+    glow = mat("LampGlow", (1.0, 0.92, 0.7), rough=0.2, emit=(1.0, 0.85, 0.55), emit_strength=6.0)
+    parts = [limb((0, 0, 0), (0, 0, 3.0), 0.06, iron, seg=10, r_end=0.045),
+             prim("cyl", (0, 0, 0.1), (0.4, 0.4, 0.2), m=iron, seg=12),
+             limb((0, 0, 3.0), (0.5, 0, 3.15), 0.035, iron, seg=8),
+             prim("cone", (0.55, 0, 3.12), (0.4, 0.4, 0.25), m=iron, seg=12, r2=0.15),
+             prim("sphere", (0.55, 0, 3.0), (0.18, 0.18, 0.12), m=glow, seg=10, rings=6)]
+    export(os.path.join(OUT, "street_lamp.glb"), [join(parts, "StreetLamp")])
+
+    reset()
+    brick = mat("Brick", (0.62, 0.32, 0.24), rough=0.9)
+    dark = mat("BrickDark", (0.3, 0.16, 0.12), rough=0.9)
+    fire = mat("Fire", (1.0, 0.55, 0.15), rough=0.5, emit=(1.0, 0.45, 0.1), emit_strength=6.0)
+    parts = [prim("cube", (0, 0, 0.6), (1.4, 0.7, 1.2), m=brick, bevel=0.02, angle=0.5),
+             prim("cube", (0, 0.36, 0.45), (0.8, 0.02, 0.6), m=dark),
+             prim("cube", (0, 0.3, 0.3), (0.6, 0.2, 0.25), m=fire),
+             prim("cube", (0, 0, 1.25), (1.6, 0.85, 0.12), m=dark, bevel=0.01, angle=0.5),
+             prim("cube", (0, -0.1, 2.0), (0.6, 0.5, 1.4), m=brick, bevel=0.02, angle=0.5)]
+    export(os.path.join(OUT, "fireplace.glb"), [join(parts, "Fireplace")])
+
+    reset()
+    wood = mat("Wood", (0.5, 0.33, 0.2), rough=0.8)
+    iron = mat("Iron", (0.4, 0.42, 0.45), rough=0.4, metal=0.9)
+    parts = [prim("cube", (0, 0, 0.4), (1.4, 0.7, 0.8), m=wood, bevel=0.02, angle=0.5),
+             prim("cube", (0, 0, 0.84), (1.44, 0.74, 0.08), m=wood, bevel=0.02, angle=0.5),
+             prim("cube", (0, 0.37, 0.65), (0.14, 0.03, 0.16), m=iron)]
+    for x in (-0.7, 0, 0.7):
+        parts.append(prim("cube", (x, 0, 0.44), (0.05, 0.74, 0.86), m=iron))
+    export(os.path.join(OUT, "big_chest.glb"), [join(parts, "BigChest")])
+
+    reset()
+    clay = mat("Terracotta", (0.72, 0.4, 0.28), rough=0.9)
+    soil = mat("Soil", (0.25, 0.17, 0.1), rough=1.0)
+    leaf = mat("PotLeaf", (0.3, 0.55, 0.25), rough=0.8)
+    petal = mat("Petal", (1.0, 0.5, 0.65), rough=0.6)
+    parts = [prim("cone", (0, 0, 0.18), (0.4, 0.4, 0.36), m=clay, seg=14, r2=0.6),
+             prim("cyl", (0, 0, 0.35), (0.34, 0.34, 0.02), m=soil, seg=14)]
+    for i in range(5):
+        a = i / 5 * math.tau
+        parts.append(limb((0, 0, 0.35), (math.cos(a) * 0.12, math.sin(a) * 0.12, 0.75), 0.012, leaf, seg=5))
+        parts.append(prim("sphere", (math.cos(a) * 0.12, math.sin(a) * 0.12, 0.77), (0.1, 0.1, 0.06), m=petal, seg=8, rings=4))
+    export(os.path.join(OUT, "flower_pot.glb"), [join(parts, "FlowerPot")])
+
+    reset()
+    red = mat("Rug", (0.65, 0.2, 0.18), rough=1.0)
+    gold = mat("RugTrim", (0.85, 0.65, 0.3), rough=1.0)
+    parts = [prim("cube", (0, 0, 0.012), (1.8, 1.2, 0.02), m=red),
+             prim("cube", (0, 0, 0.016), (1.5, 0.9, 0.02), m=gold),
+             prim("cube", (0, 0, 0.02), (1.3, 0.7, 0.02), m=red)]
+    export(os.path.join(OUT, "rug.glb"), [join(parts, "Rug")])
+
+    reset()
+    steel = mat("Steel", (0.55, 0.58, 0.63), rough=0.4, metal=0.9)
+    hot = mat("HeaterGlow", (1.0, 0.4, 0.15), rough=0.4, emit=(1.0, 0.35, 0.1), emit_strength=4.0)
+    parts = [prim("cube", (0, 0, 0.55), (0.9, 0.5, 1.1), m=steel, bevel=0.03, angle=0.5)]
+    for i in range(5):
+        parts.append(prim("cube", (0, 0.26, 0.25 + i * 0.16), (0.7, 0.03, 0.05), m=hot))
+    parts.append(limb((0.3, 0, 1.1), (0.3, 0, 1.5), 0.06, steel, seg=8))
+    export(os.path.join(OUT, "geo_heater.glb"), [join(parts, "GeoHeater")])
+
+    reset()
+    steel = mat("Steel", (0.3, 0.3, 0.33), rough=0.4, metal=0.9)
+    glass = mat("LavaLampGlass", (1.0, 0.45, 0.15), rough=0.1, emit=(1.0, 0.4, 0.1), emit_strength=3.0)
+    parts = [prim("cone", (0, 0, 0.12), (0.4, 0.4, 0.24), m=steel, seg=14, r2=0.25),
+             prim("sphere", (0, 0, 0.5), (0.3, 0.3, 0.6), m=glass, seg=14, rings=8),
+             prim("cone", (0, 0, 0.86), (0.2, 0.2, 0.12), m=steel, seg=12, r2=0.3)]
+    export(os.path.join(OUT, "lava_lamp.glb"), [join(parts, "LavaLamp")])
+
+    reset()
+    brass = mat("Brass", (0.85, 0.65, 0.3), rough=0.3, metal=1.0)
+    dark = mat("SteelDark", (0.2, 0.2, 0.22), rough=0.4, metal=0.8)
+    lens = mat("Lens", (0.3, 0.6, 0.9), rough=0.05, metal=0.5)
+    parts = []
+    for a in range(3):
+        ang = a / 3 * math.tau
+        parts.append(limb((0, 0, 1.1), (math.cos(ang) * 0.5, math.sin(ang) * 0.5, 0), 0.025, dark, seg=6))
+    tube = limb((0, -0.5, 0.95), (0, 0.6, 1.5), 0.09, brass, seg=14, r_end=0.07)
+    parts.append(tube)
+    parts.append(prim("cyl", (0, 0.62, 1.51), (0.15, 0.15, 0.04), (R(-63), 0, 0), m=lens, seg=14))
+    export(os.path.join(OUT, "telescope.glb"), [join(parts, "Telescope")])
+
+    # 手に持つバケツ(取っ手が原点、+Z が上)
+    reset()
+    iron = mat("BucketIron", (0.6, 0.62, 0.66), rough=0.4, metal=0.9)
+    parts = [prim("cone", (0, 0, -0.18), (0.32, 0.32, 0.3), m=iron, seg=16, r2=0.75),
+             prim("torus", (0, 0, 0.0), (0.32, 0.12, 0.32), (R(90), 0, 0), m=iron, seg=16, r2=0.08)]
+    export(os.path.join(OUT, "bucket.glb"), [join(parts, "Bucket")])
+
+    reset()
+    red = mat("Dynamite", (0.8, 0.15, 0.12), rough=0.6)
+    fuse = mat("Fuse", (0.9, 0.85, 0.7), rough=0.9)
+    parts = []
+    for x in (-0.045, 0.0, 0.045):
+        parts.append(limb((x, 0, -0.1), (x, 0, 0.14), 0.024, red, seg=10))
+    parts.append(prim("cube", (0, 0, 0.0), (0.16, 0.06, 0.03), m=fuse))
+    parts.append(limb((0, 0, 0.14), (0.03, 0, 0.24), 0.005, fuse, seg=5))
+    export(os.path.join(OUT, "dynamite.glb"), [join(parts, "Dynamite")])
+
+
 if __name__ == "__main__":
     only = sys.argv[sys.argv.index("--") + 2:] if "--" in sys.argv else []
     steps = {"pioneer": make_pioneer, "fp_arm": make_fp_arm, "tools": make_tools, "nature": make_nature,
-             "workbench": make_workbench, "stations": make_stations, "furniture": make_furniture}
+             "workbench": make_workbench, "stations": make_stations, "furniture": make_furniture,
+             "biome": make_biome_nature, "new_items": make_new_items}
     for name, fn in steps.items():
         if not only or name in only:
             fn()

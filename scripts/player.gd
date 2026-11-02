@@ -15,11 +15,17 @@ var jump_requested := false
 var attack_held := false
 var can_swing := true       ## 設置できる物を持っているときは振らない
 var in_water: Callable      ## (位置) -> 水の中か
+var head_under := false     ## 頭まで水に潜っている
+var force_up := false       ## 息が続かないときに水面へ浮かせる
+var speed_mul := 1.0        ## 寒さ・暑さで遅くなる
+var swim_mul := 1.0         ## 足ひれで速くなる
+var launch_velocity := 0.0  ## 間欠泉で吹き上げられる
+var respawn_point := Vector3(0, 5, 0)  ## 地面の下に落ちたときに戻る場所
 
 var walk_speed := 5.0
 var jump_speed := 5.2
 var gravity := 14.0
-var bounds := 118.0
+var bounds := 238.0         ## 世界の端(外周の山脈の内側)
 
 var first_person := true
 var current_tool := "axe"   ## "axe" / "pickaxe" / ""(素手)
@@ -57,6 +63,9 @@ func _ready() -> void:
 
 	_tools["axe"] = load("res://assets/models/axe.glb")
 	_tools["pickaxe"] = load("res://assets/models/pickaxe.glb")
+	_tools["bucket"] = load("res://assets/models/bucket.glb")
+	_tools["bucket_full"] = _tools["bucket"]
+	_tools["dynamite"] = load("res://assets/models/dynamite.glb")
 
 	_build_body()
 
@@ -146,7 +155,9 @@ func set_tool(id: String) -> void:
 		if _tools.has(kind):
 			var t: Node3D = _tools[kind].instantiate()
 			if ItemDB.tool_tier(id) >= 2:
-				t.scale = Vector3.ONE * 1.08  # 鉄の道具は少し大きい
+				t.scale = Vector3.ONE * (1.08 if ItemDB.tool_tier(id) == 2 else 1.15)  # 鉄・鋼鉄の道具は少し大きい
+			if kind in ["bucket", "bucket_full", "dynamite"]:
+				t.scale = Vector3.ONE * 1.4
 			holder.add_child(t)
 			if holder == vm_tool_holder:
 				_set_no_shadow(t)
@@ -203,21 +214,34 @@ func _physics_process(delta: float) -> void:
 	if wish.length() > 1.0:
 		wish = wish.normalized()
 	var accel := 12.0 if is_on_floor() else 3.0
-	# 湖の中では泳ぐ(ゆっくり沈み、ジャンプで浮き上がる)
+	# 水の中では泳ぐ。頭まで潜っているときは、見ている方向(上下も)へ進む
 	var swimming: bool = in_water.is_valid() and in_water.call(global_position + Vector3(0, 1.1, 0))
-	var speed := walk_speed * (0.55 if swimming else 1.0)
-	var horiz := Vector3(velocity.x, 0, velocity.z).lerp(wish * speed, clampf(accel * delta, 0.0, 1.0))
-	velocity.x = horiz.x
-	velocity.z = horiz.z
-	if swimming:
-		velocity.y = maxf(velocity.y - gravity * 0.15 * delta, -1.2)
-		if jump_requested:
+	head_under = in_water.is_valid() and in_water.call(global_position + Vector3(0, EYE_HEIGHT, 0))
+	var speed := walk_speed * speed_mul * ((0.55 * swim_mul) if swimming else 1.0)
+	if swimming and head_under:
+		var look := -camera.global_transform.basis.z
+		var wish3 := look * move_input.y + basis_flat.x * move_input.x
+		if wish3.length() > 1.0:
+			wish3 = wish3.normalized()
+		velocity = velocity.lerp(wish3 * speed + Vector3(0, -0.35, 0), clampf(4.0 * delta, 0.0, 1.0))
+		if jump_requested or force_up:
 			velocity.y = 3.2
-	elif is_on_floor():
-		if jump_requested:
-			velocity.y = jump_speed
 	else:
-		velocity.y -= gravity * delta
+		var horiz := Vector3(velocity.x, 0, velocity.z).lerp(wish * speed, clampf(accel * delta, 0.0, 1.0))
+		velocity.x = horiz.x
+		velocity.z = horiz.z
+		if swimming:
+			velocity.y = maxf(velocity.y - gravity * 0.15 * delta, -1.2)
+			if jump_requested or force_up:
+				velocity.y = 3.2
+		elif is_on_floor():
+			if jump_requested:
+				velocity.y = jump_speed
+		else:
+			velocity.y -= gravity * delta
+	if launch_velocity != 0.0:
+		velocity.y = launch_velocity
+		launch_velocity = 0.0
 	jump_requested = false
 	move_and_slide()
 
@@ -227,12 +251,12 @@ func _physics_process(delta: float) -> void:
 	if flat.length() > bounds:
 		flat = flat.normalized() * bounds
 		global_position = Vector3(flat.x, p.y, flat.y)
-	if p.y < -30.0:
-		global_position = Vector3(0, 5, 0)
+	if p.y < -40.0:
+		global_position = respawn_point + Vector3(0, 1.0, 0)
 		velocity = Vector3.ZERO
 
 	_update_attack(delta)
-	_animate(delta, horiz.length())
+	_animate(delta, Vector2(velocity.x, velocity.z).length())
 
 
 func _update_attack(delta: float) -> void:
